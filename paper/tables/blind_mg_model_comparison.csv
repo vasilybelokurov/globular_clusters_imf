@@ -1,0 +1,4 @@
+model,n_parameters,log_likelihood,bic,concentrated_fraction,bk_auc,main_parameters
+single Mg Gaussian,2,-168.2335051726,346.6789012929,1.0,,"$\mu_{\rm Mg}=0.228$, $\sigma_{\rm Mg}=0.078$"
+"2-component Mg, shared IMF",5,-159.0095749038,343.5488771771,0.8147158926,0.8922010957138253,"$\mu_{\rm c}=0.272$, $\mu_{\rm e}=0.131$, $\sigma_{\rm Mg}=0.044$"
+"2-component Mg, split $\alpha$",7,-53.723541838,143.1887019933,0.8306487933,0.9210441508217854,"$\alpha_{\rm c}=-0.20$, $\alpha_{\rm e}=-0.64$, $\log_{10}(M_{\rm c}/{\rm M}_\odot)=6.300$"

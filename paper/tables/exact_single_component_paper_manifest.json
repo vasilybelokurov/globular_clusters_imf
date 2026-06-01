@@ -1,0 +1,14 @@
+{
+  "figure1_overview": "/Users/vasilybelokurov/IoA Dropbox/Dr V.A. Belokurov/Code/globular_clusters_imf/paper/figures/catalog_mass_semimajor_axis_overview.pdf",
+  "figure_detectability_maps": "/Users/vasilybelokurov/IoA Dropbox/Dr V.A. Belokurov/Code/globular_clusters_imf/paper/figures/detectability_em_maps.pdf",
+  "figure_detectability_convergence": "/Users/vasilybelokurov/IoA Dropbox/Dr V.A. Belokurov/Code/globular_clusters_imf/paper/figures/detectability_em_convergence.pdf",
+  "figure_conditional_observables": "/Users/vasilybelokurov/IoA Dropbox/Dr V.A. Belokurov/Code/globular_clusters_imf/paper/figures/conditional_observable_approximation.pdf",
+  "figure_corner": "/Users/vasilybelokurov/IoA Dropbox/Dr V.A. Belokurov/Code/globular_clusters_imf/paper/figures/single_component_posterior_corner.pdf",
+  "figure_intensity_plane": "/Users/vasilybelokurov/IoA Dropbox/Dr V.A. Belokurov/Code/globular_clusters_imf/paper/figures/single_component_intensity_plane.pdf",
+  "figure_summary": "/Users/vasilybelokurov/IoA Dropbox/Dr V.A. Belokurov/Code/globular_clusters_imf/paper/figures/best_single_component_summary.pdf",
+  "figure_imf": "/Users/vasilybelokurov/IoA Dropbox/Dr V.A. Belokurov/Code/globular_clusters_imf/paper/figures/single_component_profiles.pdf",
+  "figure_survivability_detectability_mass_profiles": "/Users/vasilybelokurov/IoA Dropbox/Dr V.A. Belokurov/Code/globular_clusters_imf/paper/figures/survivability_detectability_mass_profiles.pdf",
+  "figure_radial_models": "/Users/vasilybelokurov/IoA Dropbox/Dr V.A. Belokurov/Code/globular_clusters_imf/paper/figures/single_component_radial_profile.pdf",
+  "paper_numbers": "/Users/vasilybelokurov/IoA Dropbox/Dr V.A. Belokurov/Code/globular_clusters_imf/paper/tables/paper_numbers.tex",
+  "paper_summary_json": "/Users/vasilybelokurov/IoA Dropbox/Dr V.A. Belokurov/Code/globular_clusters_imf/paper/tables/paper_results_summary.json"
+}

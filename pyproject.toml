@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "globular-clusters-imf"
+version = "0.1.0"
+description = "Inference tools for the Milky Way globular-cluster initial mass function using Baumgardt catalogs."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "astropy>=6.1",
+  "lxml>=5.2",
+  "matplotlib>=3.9",
+  "numpy>=2.1",
+  "pandas>=2.2",
+  "requests>=2.32",
+  "scipy>=1.14",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -1,0 +1,7 @@
+model,component,imf_family,radial_model,alpha_dndm,log10_m_c_msun,total_initial_count,survival_fraction,total_initial_stellar_mass_msun
+Best single component,all,schechter,logpoly3,-0.8715851301299458,6.313252613880047,3526.797970312573,0.3009269352578925,601938786.9598665
+Detectability-corrected single component,all,schechter,logpoly3,-1.675,6.35,114361.733140388,0.0006412816764904,10609537994.724337
+Best detectability-corrected shared-IMF two component,in_situ,schechter,logpoly3,-0.944303274770952,6.301425508648966,697.9854980654402,0.153298313928534,276776512.6448596
+Best detectability-corrected shared-IMF two component,accreted,schechter,logpoly3,-0.944303274770952,6.301425508648966,118.6046082955844,0.4890197845892579,47031019.92612419
+Best detectability-corrected split-$\alpha$ two component,in_situ,schechter,logpoly3,-0.9683538468017268,6.309188406998557,736.2824228276828,0.1453246698312692,277652695.8943124
+Best detectability-corrected split-$\alpha$ two component,accreted,schechter,logpoly3,-0.9402802661733412,6.309188406998557,117.6314427233112,0.4930654479553199,47883146.60928419

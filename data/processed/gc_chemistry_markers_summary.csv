@@ -1,0 +1,2 @@
+updated_catalog_path,n_clusters,n_with_mgfe,n_with_alfe,n_with_mgfe_and_alfe,mgfe_offset_dex,mgfe_offset_scatter_dex,alfe_offset_dex,alfe_offset_scatter_dex
+/Users/vasilybelokurov/data/catalogues/gc_catalog_updated.fits,165,68,63,63,0.14984245598316193,0.06443310606479645,0.2481590360403061,0.19696341922581195

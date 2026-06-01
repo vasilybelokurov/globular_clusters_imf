@@ -1,0 +1,4 @@
+model_family,radial_model,best_parameters_label,log_likelihood,bic,total_initial_count,delta_bic_from_best
+schechter,logpoly3,"$\alpha=-1.675,\ \log_{10}(M_c/{\rm M}_\odot)=6.350$",395.5432363653,-765.556745361,114014.5352133975,0.0
+lognormal,logpoly3,"$\mu=4.09,\ \sigma=0.79$",391.2338336443,-756.9379399191,183936.68637614328,8.618805441900008
+powerlaw,logpoly3,$\alpha=-2.607$,380.5045664738,-740.5853510519,347499.38373421034,24.971394309099992

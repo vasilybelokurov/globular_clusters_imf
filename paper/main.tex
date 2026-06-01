@@ -1,0 +1,372 @@
+\documentclass[fleqn,usenatbib]{mnras}
+
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{hyperref}
+
+\title[On the initial mass function of GCs in the MW]{On the initial mass function of Globular Clusters in the Milky Way}
+
+\author[Author]{
+Author$^{1}$\thanks{E-mail: author@example.com} \\
+$^{1}$Affiliation to be added
+}
+
+\date{Accepted XXX. Received YYY; in original form ZZZ}
+\pubyear{2026}
+
+\begin{document}
+\input{tables/paper_numbers.tex}
+\input{tables/two_component_numbers.tex}
+\label{firstpage}
+\pagerange{\pageref{firstpage}--\pageref{lastpage}}
+\maketitle
+
+\begin{abstract}
+We model the surviving Milky Way globular-cluster catalogue directly in the $(\log M_{\rm ini}, \log a)$ plane, where $M_{\rm ini}$ is the inferred initial mass and $a$ is the orbital semimajor axis. The intrinsic birth intensity is written as a single-component Schechter initial mass function multiplied by a radial birth profile. This intrinsic distribution is filtered by two distinct effects: survivability in the $(M_{\rm ini},a)$ plane and detectability in present-day observable space. We calibrate survivability from the orbit-based dissolution-time model of \citet{Baumgardt2019} using a smooth logistic-tail surface and allow a global lifetime scale factor $\eta_t$ that shifts the survival boundary up or down in mass. Detectability is described by a logistic completeness law in $(\log M_{\rm now}, \log D_\odot, |b|, |l|)$, averaged back into intrinsic space, and solved with an iterative detectability correction. We then perform exact profiled inference in the three outer physical parameters $(\eta_t, \alpha, \log_{10} M_c)$, profiling over the radial nuisance parameters, detectability correction, and normalization at every step. The preferred single-component model uses a cubic polynomial in $\log a$ and has best-fit parameters $\eta_t=\ExactBestEta$, $\alpha=\ExactBestAlpha$, and $\log_{10}(M_c/{\rm M}_\odot)=\ExactBestMc$. Exact profiled MCMC gives $\eta_t=\PosteriorEtaMed_{-\PosteriorEtaMinus}^{+\PosteriorEtaPlus}$, $\alpha=\PosteriorAlphaMed_{-\PosteriorAlphaMinus}^{+\PosteriorAlphaPlus}$, and $\log_{10}(M_c/{\rm M}_\odot)=\PosteriorMcMed_{-\PosteriorMcMinus}^{+\PosteriorMcPlus}$. Above $M_{\rm ini}=10^4\,{\rm M}_\odot$, the inferred initial GC population is $N_0=\PosteriorNzeroMed_{-\PosteriorNzeroMinus}^{+\PosteriorNzeroPlus}$ and the corresponding initial stellar mass is $M_{\star,0}=\PosteriorMassZeroEightMed_{-\PosteriorMassZeroEightMinus}^{+\PosteriorMassZeroEightPlus}\times10^8\,{\rm M}_\odot$. The detectability correction raises the same-Schechter baseline normalization by a factor of \ExactCountRatio. Among the tested radial families, the smooth $\texttt{logpoly3}$ law is preferred over a five-bin step model, a single power law in $a$, and a cored power law in $a$.
+\end{abstract}
+
+\begin{keywords}
+Galaxy: globular clusters: general -- Galaxy: evolution -- Galaxy: structure -- stars: luminosity function, mass function
+\end{keywords}
+
+\section{Introduction}\label{sec:intro}
+\textit{Introduction to be added in the next draft.}
+
+\section{Data}\label{sec:data}
+Our starting point is the Baumgardt Milky Way GC catalogue, specifically the online tables of orbital parameters and structural parameters locally saved in this project from the March 2023 version of the web database \citep{Baumgardt2019,BaumgardtCatalog2023}. From these tables we use the inferred initial cluster mass $M_{\rm ini}$ and the orbital semimajor axis $a$ for each GC. The final working catalogue contains 165 clusters.
+
+The analysis below is carried out directly in the $(\log M_{\rm ini}, \log a)$ plane. The three lowest inferred initial masses in the observed sample are Whiting~1 ($\log_{10}M_{\rm ini}=3.68$), AM~4 ($4.02$), and Pal~1 ($4.09$). Apart from Whiting~1, the catalogue therefore effectively reaches down only to $M_{\rm ini}\sim10^4\,{\rm M}_\odot$. For that reason, all quoted cumulative counts and masses are reported only for $M_{\rm ini}\ge10^4\,{\rm M}_\odot$, rather than extrapolating the fitted IMF farther down.
+
+Figure~\ref{fig:catalog_overview} summarizes the working catalogue and the adopted smooth survivability model. The left-hand panel shows the present-day and inferred initial masses of the Baumgardt clusters as a function of orbital semimajor axis. The right-hand panel shows the effective survivability plane $S(M_{\rm ini}, a)$ introduced in Section~\ref{sec:survival}, evaluated at the reference lifetime scale $\eta_t=1$, together with the $S=0.5$ survival boundary for two additional lifetime scalings.
+
+\begin{figure*}
+    \centering
+    \includegraphics[width=\textwidth]{figures/catalog_mass_semimajor_axis_overview.pdf}
+    \caption{Overview of the Baumgardt Milky Way GC catalogue and the adopted smooth survivability model. Left: present-day mass and inferred initial mass as a function of orbital semimajor axis. Right: the fitted smooth survivability surface $S(M_{\rm ini},a)$ for the reference lifetime scale $\eta_t=1$. The solid, dashed, and dotted curves show the fitted $S=0.5$ boundary for $\eta_t=1$, $0.5$, and $2$, respectively. Black points mark the surviving GCs in the catalogue.}
+    \label{fig:catalog_overview}\label{fig:survivability}
+\end{figure*}
+
+\section{Forward model for the GC catalogue}\label{sec:selection}
+
+The catalogue contains both intrinsic quantities, which describe the inferred birth mass and orbit of each cluster, and present-day observables, which determine whether a surviving cluster would enter the observed sample. We denote the intrinsic coordinates by
+\begin{equation}
+x=(\log M_{\rm ini}, \log a),
+\end{equation}
+and the present-day observable coordinates used in the completeness model by
+\begin{equation}
+y=(\log M_{\rm now}, \log D_\odot, |b|, |l|).
+\end{equation}
+
+A fully marked point-process model would describe the detected catalogue with an intensity
+\begin{equation}
+\lambda_{\rm det}(x,y)
+=
+N_0\,\phi(\log M_{\rm ini})\,A(\log a)\,
+S(x)\,p(y|x)\,C(y),
+\end{equation}
+where $\phi$ is the initial mass function, $A$ is the radial birth profile, $S$ is the probability of surviving to the present day, $p(y|x)$ describes the distribution of present-day observables at fixed intrinsic coordinates, and $C$ is the probability that a cluster with observables $y$ is included in the catalogue. In this full model, each observed cluster would contribute its actual present-day observables $y_i$ to the likelihood.
+
+Our implementation uses an intrinsic-space approximation to this marked model. Instead of fitting the full conditional distribution $p(y|x)$ in the likelihood, we average the observable-space completeness over an approximate $p(y|x)$ and define
+\begin{equation}
+Q(x)=\int p(y|x)\,C(y)\,{\rm d}y.
+\end{equation}
+The detected intensity in the intrinsic plane is then
+\begin{equation}
+\lambda_{\rm obs}(x)
+=
+N_0\,\phi(\log M_{\rm ini})\,A(\log a)\,S(x)\,Q(x).
+\end{equation}
+Thus $Q$ is the mean detectability of a surviving cluster at a given point in the $(\log M_{\rm ini},\log a)$ plane. This approximation keeps the likelihood two-dimensional while retaining the leading effect of present-day observational incompleteness.
+
+For the observed catalogue $\mathcal{D}=\{x_i\}_{i=1}^{N}$, where $N$ is the number of observed GCs in the working catalogue, the implemented likelihood is the inhomogeneous Poisson likelihood
+\begin{equation}
+\ln \mathcal{L}
+=
+\sum_{i=1}^{N} \ln \lambda_{\rm obs}(x_i)
+-
+\int_{\Omega} \lambda_{\rm obs}(x)\,{\rm d}x,
+\end{equation}
+Here we omit the Poisson counting term $-\ln N!$ when optimizing models against the same fixed catalogue, since it does not depend on the model parameters. When comparing model classes with different catalogue partitions or label assignments, the corresponding counting terms must be treated consistently. The rest of this section defines the two selection terms, $S$ and $Q$, used in this intrinsic-space likelihood.
+
+\subsection{Survivability}\label{sec:survival}
+The observed catalogue is not the IMF itself. It is the subset of clusters that both formed and survived until the present day. We therefore write the first selection term as a survival probability
+\begin{equation}
+S(\log M_{\rm ini}, a \mid \eta_t).
+\end{equation}
+
+The starting point is the analytic dissolution-time prescription used by \citet{Baumgardt2019}. We introduce a dimensionless lifetime-scale parameter $\eta_t$ that multiplies the nominal dissolution rate, or equivalently rescales the age against which the dissolution time is compared. The reference value $\eta_t=1$ corresponds to the unscaled 12 Gyr survival requirement. Values $\eta_t>1$ make clusters longer lived and move the survival boundary to lower initial mass, whereas values $\eta_t<1$ make clusters shorter lived and move the boundary to higher initial mass. For each catalogued GC orbit we compute the threshold mass $M_{\rm cut}(r_{\rm apo}, e)$ that satisfies
+\begin{equation}
+t_{\rm dis}(M_{\rm cut}, r_{\rm apo}, e)=12\,{\rm Gyr}/\eta_t,
+\end{equation}
+so changing $\eta_t$ shifts the survivability boundary in the $(M_{\rm ini},a)$ plane.
+
+We first convert the orbit-by-orbit cuts into a raw survivor-based map in $(\log M_{\rm ini}, \log a)$ by kernel-averaging the survival indicators over nearby semimajor axes. This raw map is then regularized into a smooth monotonic family of boundaries $B_{10}(a)$, $B_{50}(a)$, and $B_{90}(a)$ that track the $S=0.1$, $0.5$, and $0.9$ contours. The adopted survivability surface is a logistic transition in $\log M_{\rm ini}$ at fixed semimajor axis,
+\begin{equation}
+S(m,a)=\left[1+\exp\left(-\frac{m-B_{50}(a)}{\sigma(a)}\right)\right]^{-1},
+\end{equation}
+with $m\equiv\log M_{\rm ini}$ and
+\begin{equation}
+\sigma(a)=\frac{B_{90}(a)-B_{10}(a)}{2\ln 9}.
+\end{equation}
+This construction preserves the calibrated $S=0.1$, $0.5$, and $0.9$ contours and gives a finite, monotonically increasing survival probability throughout the fitted $(M_{\rm ini},a)$ domain.
+
+\subsection{Detectability}\label{sec:detectability}
+Survival is not the only filter acting on the GC catalogue. Even among survivors, detectability depends on present-day observables. We therefore introduce a second selection term,
+\begin{equation}
+C(\log M_{\rm now}, \log D_\odot, |b|, |l|),
+\end{equation}
+and treat it separately from the dynamical survivability surface.
+
+In the implementation, present-day observable space is binned in $\log M_{\rm now}$, $\log D_\odot$, $|b|$, and $|l|$. The completeness assigned to each bin is written as a logistic function,
+\begin{equation}
+C = \left[1 + \exp\left(-\beta_0 - s_M z_M + s_D z_D - s_b z_b - s_l z_l\right)\right]^{-1},
+\end{equation}
+where $z_M$, $z_D$, $z_b$, and $z_l$ are standardized versions of the bin-centred values of $\log M_{\rm now}$, $\log D_\odot$, $|b|$, and $|l|$. The slope parameters are positive by construction, so completeness rises with present-day mass, latitude, and absolute longitude, and falls with heliocentric distance.
+
+To evaluate the effective detectability $Q$, we approximate the conditional distribution $p(y|x)$ rather than fit it as a separate high-dimensional model. We model $\log M_{\rm now}$ using an empirical relation for $\log(M_{\rm now}/M_{\rm ini})$ as a function of $\log M_{\rm ini}$ and $\log a$, including the observed residual scatter when assigning probabilities to present-day mass bins. We then treat $a$ as the characteristic present-day Galactocentric radius of the cluster. At fixed radius $a$, we draw isotropic Galactocentric positions and place the Sun at $R_0=8.2\,\mathrm{kpc}$; this gives the corresponding probability distribution over heliocentric-distance, latitude, and longitude bins. Averaging the binned completeness $C$ over these present-day mass and sky-position probabilities gives the implemented $Q(\log M_{\rm ini},a)$.
+
+Figure~\ref{fig:conditional_observable_approximation} summarizes the present-day mass part of this approximation in the same intrinsic plane used by the likelihood. It compares the observed mass-loss residual, the fitted proxy model, and the remaining per-cluster residuals.
+
+\begin{figure*}
+    \centering
+    \includegraphics[width=\textwidth]{figures/conditional_observable_approximation.pdf}
+    \caption{Present-day mass approximation used when averaging the observable-space completeness into $Q(\log M_{\rm ini},a)$. Left: observed mass-loss residual $\log_{10}(M_{\rm ini}/M_{\rm now})$ in the intrinsic $(M_{\rm ini},a)$ plane. Middle: fitted empirical proxy for the same quantity. Right: per-cluster residuals between the observed and modelled mass-loss residuals. The model is used only to assign probabilities to present-day mass bins at fixed $(M_{\rm ini},a)$; the sky-position part of $p(y|x)$ is computed separately from isotropic Galactocentric positions at fixed $a$.}
+    \label{fig:conditional_observable_approximation}
+\end{figure*}
+
+Figure~\ref{fig:detectability_em_maps} summarizes the final detectability correction. The one-dimensional panels show how the fitted observable-space completeness $C$ changes with each of its four arguments when the other three are held at representative catalogue values. The lower panel shows the resulting effective detectability $Q(\log M_{\rm ini},a)$ after averaging $C$ over the approximate present-day observable distribution described above.
+
+\begin{figure*}
+    \centering
+    \includegraphics[width=\textwidth]{figures/detectability_em_maps.pdf}
+    \caption{Detectability correction used by the adopted intrinsic-space likelihood. Top: response curves of the fitted observable-space completeness law $C(\log M_{\rm now},\log D_\odot,|b|,|l|)$, varying one observable at a time while holding the others fixed at their catalogue medians. Rug marks show the observed catalogue values along each axis. Bottom: effective detectability $Q(\log M_{\rm ini},a)$ obtained by averaging $C$ over the approximate conditional distribution of present-day observables at fixed intrinsic coordinates. White points mark the observed GCs.}
+    \label{fig:detectability_em_maps}
+\end{figure*}
+
+\section{Single-component implementation}\label{sec:model_single}
+For the single-component model used in this paper, the IMF factor $\phi$ in the intrinsic intensity is a Schechter function with slope $\alpha$ and cutoff mass $M_c$, normalized over the fitted range in $\log M_{\rm ini}$. The radial birth factor $A$ is a normalized function of $\log a$; our preferred family is the smooth cubic polynomial $\texttt{logpoly3}$, but we also compare against a five-bin step model, a single power law in $a$, and a cored power law $dN/da\propto(a+a_c)^{-\gamma}$. The total normalization $N_0$ is the inferred number of initial clusters over the fitted domain. With these definitions, all likelihood evaluations use the intrinsic-space intensity defined in Section~\ref{sec:selection}.
+
+\subsection{Iterative detectability correction}\label{sec:detectability_algorithm}
+The detectability term is solved with an iterative detectability correction. At fixed outer parameters $(\eta_t,\alpha,\log_{10}M_c)$ we:
+\begin{enumerate}
+    \item build the smooth survivability surface $S(M_{\rm ini},a\mid\eta_t)$;
+    \item fit the baseline single-component model assuming $Q=1$;
+    \item project the resulting complete surviving population into $(\log M_{\rm now}, \log D_\odot, |b|, |l|)$;
+    \item fit the logistic completeness law in observable space;
+    \item average that completeness back into intrinsic space to obtain $Q(M_{\rm ini},a)$;
+    \item refit the intrinsic model and repeat until convergence.
+\end{enumerate}
+The profiling uses 12 such iterations at each outer trial point. In practice the detectability update converges quickly in the high-likelihood region of parameter space. Figure~\ref{fig:detectability_em_convergence} shows an unfiltered grid of representative inner solves for trial outer parameters near the preferred region, extended to 30 iterations as a diagnostic. Two behaviours are apparent. Some trials stabilize rapidly: the inferred normalization, mean detectability, predicted observed count, and profiled intrinsic likelihood change little after this iteration count. Other trials drift toward very low effective detectability and very large normalization; these are low-likelihood self-consistent corrections associated with poor outer parameters. They are not removed by hand, but are retained as likelihood evaluations and are naturally disfavoured by the outer profile likelihood. The likelihood sequence is not constrained to increase at every step: at each step the inner fit optimizes the likelihood for the current fixed $Q$, whereas the next step changes $Q$ itself.
+
+\begin{figure}
+    \centering
+    \includegraphics[width=\columnwidth]{figures/detectability_em_convergence.pdf}
+    \caption{Unfiltered grid of representative inner solves for the iterative detectability correction at fixed trial outer parameters near the preferred region, shown for 30 iterations. Each transparent line is one solve, with the same colour used across all panels; the colour ordering follows the final profiled log-likelihood of the solve. The vertical dashed line marks the 12 iterations used in profiling. The panels show the inferred initial count above $M_{\rm ini}=10^4\,{\rm M}_\odot$, the mean effective detectability above the same mass, the predicted observed catalogue size, and the change in profiled intrinsic log-likelihood relative to the first iteration of each solve.}
+    \label{fig:detectability_em_convergence}
+\end{figure}
+
+\subsection{Exact profiling and MCMC}\label{sec:optimization}
+The expensive part of the problem is not the Schechter IMF itself, but the nested profiling over the radial law, detectability correction, and normalization. We therefore separate the inference into outer physical parameters and inner nuisance parameters.
+
+The outer parameter vector is
+\begin{equation}
+\theta_{\rm out}=(\eta_t,\alpha,\log_{10}M_c).
+\end{equation}
+For every proposed $\theta_{\rm out}$ we rebuild the survivability surface, run the iterative detectability correction, and profile over the $\texttt{logpoly3}$ radial parameters and the total normalization. The inner solve is deterministic: every likelihood evaluation uses the same restart library and optimization settings, so the outer likelihood does not depend on chain history.
+
+We first map the likelihood surface with a broad exact coarse scan, then refine the high-likelihood region. After locating the main ridge we run exact parallel profiled MCMC in the three outer parameters only, profiling over the nuisance parameters at every step. The production run used six chains of 900 steps each, with a burn-in of 300 steps and thinning by a factor of 2. Figure~\ref{fig:single_component_posterior} shows the corresponding exact profiled posterior.
+
+\begin{figure*}
+    \centering
+    \includegraphics[width=0.72\textwidth]{figures/single_component_posterior_corner.pdf}
+    \caption{Exact profiled posterior for the three outer physical parameters $(\eta_t,\alpha,\log_{10}M_c)$ in the adopted single-component model. The inner radial and detectability nuisance parameters are re-optimized at every step, so the plotted posterior is the true profiled posterior in the outer physical parameter space.}
+    \label{fig:single_component_posterior}
+\end{figure*}
+
+\subsection{Single-component results}\label{sec:single_component_results}
+The preferred single-component model uses the smooth $\texttt{logpoly3}$ radial family. Its best-fit parameters are
+\begin{equation}
+\eta_t=\ExactBestEta,
+\qquad
+\alpha=\ExactBestAlpha,
+\qquad
+\log_{10}(M_c/{\rm M}_\odot)=\ExactBestMc,
+\end{equation}
+with $\log\mathcal{L}=\ExactBestLogL$. The corresponding exact profiled MCMC gives
+\begin{equation}
+\eta_t = \PosteriorEtaMed_{-\PosteriorEtaMinus}^{+\PosteriorEtaPlus},
+\end{equation}
+\begin{equation}
+\alpha = \PosteriorAlphaMed_{-\PosteriorAlphaMinus}^{+\PosteriorAlphaPlus},
+\end{equation}
+\begin{equation}
+\log_{10}(M_c/{\rm M}_\odot)=\PosteriorMcMed_{-\PosteriorMcMinus}^{+\PosteriorMcPlus}.
+\end{equation}
+Above $M_{\rm ini}=10^4\,{\rm M}_\odot$, the inferred initial population is
+\begin{equation}
+N_0 = \PosteriorNzeroMed_{-\PosteriorNzeroMinus}^{+\PosteriorNzeroPlus},
+\end{equation}
+corresponding to a total initial stellar mass of
+\begin{equation}
+M_{\star,0}=\PosteriorMassZeroEightMed_{-\PosteriorMassZeroEightMinus}^{+\PosteriorMassZeroEightPlus}\times10^8\,{\rm M}_\odot.
+\end{equation}
+The mean detectability of the surviving population is
+\begin{equation}
+\langle Q\rangle_{S,M>10^4} = \PosteriorMeanDetectabilityMed_{-\PosteriorMeanDetectabilityMinus}^{+\PosteriorMeanDetectabilityPlus}.
+\end{equation}
+This is an average over the model-predicted surviving population above $10^4\,{\rm M}_\odot$, not an area average of the $Q(\log M_{\rm ini},a)$ map and not an average over only the observed catalogue. Relative to the same-Schechter perfect-detectability baseline at the best-fit outer parameters, the detectability correction raises the inferred normalization from $N_0=\ExactBaselineNzero$ to $N_0=\ExactBestNzero$, a factor of \ExactCountRatio.
+
+Figure~\ref{fig:survivability_detectability_mass_profiles} shows the same selection terms collapsed as functions of initial mass. The left panel shows
+\begin{equation}
+\langle S\rangle_{\rho(a)}(\log M_{\rm ini}) =
+\int S(\log M_{\rm ini},a)\,\rho(a)\,d\log a ,
+\end{equation}
+where $\rho(a)$ is the fitted intrinsic radial birth profile. The right panel shows
+\begin{equation}
+\begin{aligned}
+\langle Q\rangle_{\rho S}(\log M_{\rm ini})
+&= \frac{\int Q(\log M_{\rm ini},a)\,w_S\,d\log a}
+        {\int w_S\,d\log a},\\
+w_S(\log M_{\rm ini},a)
+&= S(\log M_{\rm ini},a)\,\rho(a).
+\end{aligned}
+\end{equation}
+Thus the detectability curve is not averaged over all radii at fixed mass. It is averaged over the clusters that survive at that mass.
+
+This distinction is important. The two-dimensional $Q$ map in Figure~\ref{fig:detectability_em_maps} contains low-detectability regions in the inner Galaxy, especially at low present-day mass. However, these are also the regions where the survivability surface removes a large fraction of the initial population. In the adopted model, low-mass clusters born at small $a$ rarely survive to the present day; the surviving inner clusters are biased toward higher initial mass, where the present-day mass proxy gives higher detectability. At larger $a$, lower-mass survivors are more common, but their sky-averaged detectability is also higher. The scalar $\langle Q\rangle_{S,M>10^4}$ is therefore high because it is a survivor-weighted average. It measures the completeness of the surviving population predicted by the model, not the completeness of all initial clusters and not the visual area covered by the $Q(\log M_{\rm ini},a)$ map.
+
+\begin{figure}
+    \centering
+    \includegraphics[width=\columnwidth]{figures/survivability_detectability_mass_profiles.pdf}
+    \caption{Mass dependence of the two selection factors in the adopted exact single-component fit. Left: radial-profile-weighted survivability, $\langle S\rangle_{\rho(a)}$. Right: detectability averaged over the surviving population at fixed initial mass, $\langle Q\rangle_{\rho(a)S}$; the dotted horizontal line marks the posterior median of the scalar survivor-weighted mean $\langle Q\rangle_{S,M>10^4}$. Solid curves show the best profiled model. Shaded bands show the central 68 per cent range from the stored posterior $S$ and $Q$ surface samples, with the best-fit radial weighting held fixed. The high value of the scalar mean reflects the ordering of the two selection effects: many low-mass inner clusters occupy low-$Q$ regions but also have low survivability, so they carry little weight in the survivor-weighted average.}
+    \label{fig:survivability_detectability_mass_profiles}
+\end{figure}
+
+Figure~\ref{fig:single_component_intensity_plane} shows the adopted relative detected probability density in the $(M_{\rm ini},a)$ plane, and Figure~\ref{fig:best_single_component} shows its one-dimensional projections together with the residual map. The preferred model follows the observed catalogue well with a moderate detectability correction and a total inferred population of order $\PosteriorNzeroMed$ clusters above $10^4\,{\rm M}_\odot$.
+
+\begin{figure}
+    \centering
+    \includegraphics[width=\columnwidth]{figures/single_component_intensity_plane.pdf}
+    \caption{Relative detected probability density in the $(M_{\rm ini},a)$ plane for the adopted exact single-component model, with the surviving clusters overplotted in black. Darker greyscale values indicate higher probability density, and the contours mark relative density levels of 0.01, 0.1, and 0.5. This is the standalone version of the intrinsic-plane panel that used to be embedded in the multi-panel summary figure.}
+    \label{fig:single_component_intensity_plane}
+\end{figure}
+
+\begin{figure*}
+    \centering
+    \includegraphics[width=\textwidth]{figures/best_single_component_summary.pdf}
+    \caption{Three-panel summary of the adopted exact single-component model. Left: the projected initial-mass distribution. Middle: the projected semimajor-axis distribution. Right: residual significance in coarse bins of the $(M_{\rm ini},a)$ plane. The line predictions use the best profiled monotonic-$Q$ solution.}
+    \label{fig:best_single_component}
+\end{figure*}
+
+Figure~\ref{fig:single_component_profiles} shows the inferred Schechter IMF with a truthful posterior band built directly from the exact profiled posterior samples. Because the band is constructed from the posterior samples themselves rather than from a local covariance approximation, it captures both the uncertainty in slope and cutoff mass and the uncertainty in the normalization above $10^4\,{\rm M}_\odot$.
+
+\begin{figure}
+    \centering
+    \includegraphics[width=\columnwidth]{figures/single_component_profiles.pdf}
+    \caption{Inferred Schechter IMF for the adopted exact single-component model, shown only for $M_{\rm ini}\ge10^4\,{\rm M}_\odot$. The dark curve is the posterior median and the shaded regions show the 68 and 95 per cent posterior bands obtained directly from the exact profiled MCMC samples.}
+    \label{fig:single_component_profiles}
+\end{figure}
+
+The radial model comparison is shown in Figure~\ref{fig:single_component_radial_profile}. On the same exact footing, the smooth $\texttt{logpoly3}$ family outperforms all three alternatives. Relative to the preferred model, the five-bin step model is worse by $\Delta\mathrm{AIC}=\StepFiveDeltaAIC$ and $\Delta\mathrm{BIC}=\StepFiveDeltaBIC$, while the single power law in $a$ is worse by $\Delta\mathrm{AIC}=\PowerLawADeltaAIC$ and $\Delta\mathrm{BIC}=\PowerLawADeltaBIC$. The cored power law performs better than either of these simpler alternatives, with $\Delta\mathrm{AIC}=\CoredPowerLawADeltaAIC$ and $\Delta\mathrm{BIC}=\CoredPowerLawADeltaBIC$, but it remains disfavoured relative to $\texttt{logpoly3}$. Its posterior radial parameters are $\gamma=\CoredPowerLawAGammaMed_{-\CoredPowerLawAGammaMinus}^{+\CoredPowerLawAGammaPlus}$ and $a_c=\CoredPowerLawACoreKpcMed_{-\CoredPowerLawACoreKpcMinus}^{+\CoredPowerLawACoreKpcPlus}\,{\rm kpc}$. The preference for $\texttt{logpoly3}$ is therefore not just visual; it survives the explicit complexity penalty as well.
+
+\begin{figure*}
+    \centering
+    \includegraphics[width=\textwidth]{figures/single_component_radial_profile.pdf}
+    \caption{Radial-model comparison under the same logistic-tail survivability model and the same exact profiled Schechter framework. Left: inferred intrinsic radial profiles, shown as the initial number of clusters above $10^4\,{\rm M}_\odot$ per dex in semimajor axis. Right: observed semimajor-axis counts compared to the corresponding detected-count predictions. The preferred $\texttt{logpoly3}$ family fits the observed radial counts better than the five-bin step model, the single power law in $a$, and the cored power law in $a$.}
+    \label{fig:single_component_radial_profile}
+\end{figure*}
+
+\section{Two-component model with Belokurov--Kravtsov labels}\label{sec:two_component}
+We next fit a labelled two-component extension using the in-situ/accreted assignments of \citet{BelokurovKravtsov2024}. The labels are treated as fixed data, not inferred mixture memberships. Thus the model asks whether the same IMF, filtered through two different radial birth profiles, gives a better description of the labelled catalogue.
+
+Let $g\in\{\mathrm{in},\mathrm{acc}\}$ denote the Belokurov--Kravtsov label. The two component intensities are
+\begin{equation}
+\lambda_g(x)
+=
+N_{0,g}\,\phi(\log M_{\rm ini}\mid \alpha,M_c)\,
+A_g(\log a)\,S(x\mid\eta_t)\,Q(x),
+\end{equation}
+where the Schechter IMF parameters $(\alpha,\log_{10}M_c)$ and survivability parameter $\eta_t$ are shared, while each component has its own normalized smooth $\texttt{logpoly3}$ radial profile $A_g$ and normalization $N_{0,g}$. The detectability term $Q$ is the same intrinsic-space approximation defined in Section~\ref{sec:detectability}; the completeness law is fitted to the pooled observed catalogue and then applied to both labelled components. The labelled point-process likelihood is
+\begin{equation}
+\ln \mathcal{L}_{2}
+=
+\sum_g
+\left[
+\sum_{i\in g}\ln\lambda_g(x_i)
+-
+\int_\Omega \lambda_g(x)\,{\rm d}x
+-
+\ln N_g!
+\right],
+\end{equation}
+with $N_{\rm in}=\TwoCompNInSitu$, $N_{\rm acc}=\TwoCompNAccreted$, and $N=\TwoCompNTotal$.
+
+The factorial term matters for comparing the labelled two-component model to the unlabelled single-component model. The single-component likelihood contains $-\ln N!$, whereas the fixed labelled likelihood contains $-\ln N_{\rm in}!-\ln N_{\rm acc}!$. If the parameter-independent constants have been dropped during optimization, the labelled two-component likelihood must therefore be shifted onto the single-catalogue scale by
+\begin{equation}
+C_{\rm part}
+=
+\ln\frac{N!}{N_{\rm in}!\,N_{\rm acc}!}
+=\TwoCompPartitionConstant .
+\end{equation}
+Equivalently,
+\begin{align}
+\ln\mathcal{L}_{2,\mathrm{cond}}
+&=
+\ln\mathcal{L}_{2,\mathrm{raw}}+C_{\rm part},\\
+\mathrm{BIC}_{2,\mathrm{cond}}
+&=
+\mathrm{BIC}_{2,\mathrm{raw}}-2C_{\rm part}.
+\end{align}
+This correction does not affect the posterior within the two-component model, but it is required for any one- versus two-component $\Delta\mathrm{BIC}$. With the convention $\Delta\mathrm{BIC}=\mathrm{BIC}_{2}-\mathrm{BIC}_{1}$, the raw comparison gives $\Delta\mathrm{BIC}_{\rm raw}=\TwoCompRawDeltaBIC$, while the fixed-label correction gives $\Delta\mathrm{BIC}_{\rm cond}=\TwoCompConditionalDeltaBIC$. The corrected number should be interpreted as support for the imposed Belokurov--Kravtsov radial split, not as a blind discovery of two populations.
+
+Table~\ref{tab:two_component_check} summarizes the exact profiled MCMC result. The shared outer-parameter posterior is almost unchanged relative to the single-component fit. The two-component run gives $\eta_t=\TwoCompEtaMed_{-\TwoCompEtaMinus}^{+\TwoCompEtaPlus}$, $\alpha=\TwoCompAlphaMed_{-\TwoCompAlphaMinus}^{+\TwoCompAlphaPlus}$, and $\log_{10}(M_c/{\rm M}_\odot)=\TwoCompMcMed_{-\TwoCompMcMinus}^{+\TwoCompMcPlus}$, consistent with the single-component posterior. The total inferred population above $10^4\,{\rm M}_\odot$ is also similar, $N_0=\TwoCompNzeroMed_{-\TwoCompNzeroMinus}^{+\TwoCompNzeroPlus}$.
+
+The useful new information is the decomposition of this lower bound. The accreted-labelled clusters contribute $N_{0,\rm acc}=\TwoCompAccretedNzeroMed_{-\TwoCompAccretedNzeroMinus}^{+\TwoCompAccretedNzeroPlus}$ above $10^4\,{\rm M}_\odot$, corresponding to an accreted fraction $f_{\rm acc}=\TwoCompAccretedFractionMed_{-\TwoCompAccretedFractionMinus}^{+\TwoCompAccretedFractionPlus}$. Most of the broad high-normalization tail therefore remains attached to the in-situ-labelled component, not to the accreted-labelled one. Since the labels are imposed rather than inferred, this result is best read as a labelled decomposition of the single-component solution: allowing the Belokurov--Kravtsov components to have separate radial profiles does not move the inferred Schechter IMF appreciably.
+
+\begin{table*}
+    \centering
+    \caption{Exact profiled MCMC comparison between the adopted single-component model and the labelled Belokurov--Kravtsov two-component diagnostic. Quoted intervals are the central 68 per cent posterior ranges. The two-component model has a shared Schechter IMF and separate $\texttt{logpoly3}$ radial profiles for the fixed in-situ and accreted labels.}
+    \label{tab:two_component_check}
+    \begin{tabular}{lcccc}
+        \hline
+        \input{tables/two_component_results.tex}
+    \end{tabular}
+\end{table*}
+
+\section{Discussion}\label{sec:discussion}
+
+\subsection{Comparison with previous constraints on the initial GC mass function}\label{sec:discussion_literature}
+The literature on the GC initial mass function has long split into two broad families. In one, the present-day bell-shaped mass scale is close to primordial. \citet{Vesperini1998} showed that a lognormal Galactic GC mass function behaves as a quasi-equilibrium solution under long-term dynamical evolution, whereas an initial power law is driven toward a lognormal form. Using the joint evolution of the Old Halo number-density and mass-density profiles, \citet{ParmentierGilmore2005} similarly argued that the Milky Way data favour an initial mass spectrum already depleted at the low-mass end rather than an unbroken power law extending to very small masses. In a complementary formation-based argument, \citet{ParmentierGilmore2007} showed that gas expulsion from protoglobular clouds can itself generate a bell-shaped initial GC mass function, even when the parent cloud spectrum is a truncated power law.
+
+The alternative tradition starts from a young-cluster-like Schechter or power-law distribution and relies on subsequent disruption to generate the present-day turnover. \citet{FallZhang2001} showed that a wide range of initial conditions evolve toward a turnover near $2\times10^5\,{\rm M}_\odot$ after 12 Gyr. Extragalactic data also support evolved Schechter descriptions: \citet{Jordan2007} found that Virgo-cluster GC systems are well fit by evolved Schechter functions, and \citet{Kruijssen2015} argued that a Schechter-like birth function is rapidly pruned in high-pressure discs before the survivors migrate into galaxy haloes.
+
+Our preferred Milky Way solution is Schechter-like, with a cutoff mass $\log_{10}(M_c/{\rm M}_\odot)\simeq\PosteriorMcMed$. The detectability correction is significant but moderate: above $10^4\,{\rm M}_\odot$ it raises the same-Schechter baseline by a factor of \ExactCountRatio. The resulting lower bound, $N_0\simeq\PosteriorNzeroMed$ and $M_{\star,0}\simeq\PosteriorMassZeroEightMed\times10^8\,{\rm M}_\odot$, is larger than the directly observed surviving catalogue, as expected once disrupted and undetected clusters are included.
+
+\subsection{A lower bound on the initial GC population}\label{sec:lower_bound}
+The present analysis constrains the progenitors of the \emph{surviving} Milky Way GC family. It does not constrain a completely destroyed population that leaves no surviving counterpart in the current catalogue. In that sense the fitted normalization is intentionally conservative: it is the number of progenitors required to explain the observed survivors once survivability and detectability are treated self-consistently, not the total number of clusters that may once have formed in the proto-Milky Way.
+
+This limitation is clearest in the inner Galaxy. The fitted survivability surface still rises steeply toward small semimajor axis, and the present data provide little direct leverage on clusters that were destroyed before the present epoch. The reported normalization should therefore be interpreted as a lower bound tied to the surviving Milky Way GC family above $M_{\rm ini}=10^4\,{\rm M}_\odot$.
+
+\section{Conclusions}\label{sec:conclusion}
+The main results of this draft are as follows.
+\begin{enumerate}
+    \item The Milky Way GC catalogue can be modelled directly as a Poisson point process in the $(\log M_{\rm ini},\log a)$ plane, with an intrinsic Schechter IMF and a radial birth profile filtered by survivability and detectability.
+    \item The adopted survivability surface is a smooth logistic-tail transition in $\log M_{\rm ini}$ at fixed semimajor axis, calibrated to the orbit-based dissolution-time model through the $S=0.1$, $0.5$, and $0.9$ contours.
+    \item In the adopted exact single-component model, the best-fit outer parameters are $\eta_t=\ExactBestEta$, $\alpha=\ExactBestAlpha$, and $\log_{10}(M_c/{\rm M}_\odot)=\ExactBestMc$, with posterior medians $\eta_t=\PosteriorEtaMed_{-\PosteriorEtaMinus}^{+\PosteriorEtaPlus}$, $\alpha=\PosteriorAlphaMed_{-\PosteriorAlphaMinus}^{+\PosteriorAlphaPlus}$, and $\log_{10}(M_c/{\rm M}_\odot)=\PosteriorMcMed_{-\PosteriorMcMinus}^{+\PosteriorMcPlus}$.
+    \item Above $M_{\rm ini}=10^4\,{\rm M}_\odot$, the inferred initial GC population is $N_0=\PosteriorNzeroMed_{-\PosteriorNzeroMinus}^{+\PosteriorNzeroPlus}$, corresponding to $M_{\star,0}=\PosteriorMassZeroEightMed_{-\PosteriorMassZeroEightMinus}^{+\PosteriorMassZeroEightPlus}\times10^8\,{\rm M}_\odot$.
+    \item The detectability correction is moderate: at fixed Schechter parameters it raises the baseline normalization by a factor of \ExactCountRatio.
+    \item Among the tested radial families, the smooth $\texttt{logpoly3}$ model is preferred over the five-bin step model, a single power law in $a$, and a cored power law in $a$, even after the information-criterion penalty for additional flexibility is included.
+    \item All quoted normalizations remain lower bounds. The present analysis cannot constrain a completely destroyed GC population in the inner Galaxy, and the reported totals refer only to the progenitors of the surviving GC family anchored by the observed catalogue.
+\end{enumerate}
+
+\section*{Data availability}
+All figures, tables, and scripts used in this draft are stored locally in the project directory. The Baumgardt source tables are saved under \texttt{data/raw/}, the processed catalogues are under \texttt{data/processed/}, and the paper-ready single-component figures and summary tables are regenerated by \path{scripts/build_paper_assets_exact_single_component.py}.
+
+\bibliographystyle{mnras}
+\bibliography{references}
+
+\bsp
+\label{lastpage}
+\end{document}

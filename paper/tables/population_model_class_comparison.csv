@@ -1,0 +1,4 @@
+model_class,description,n_parameters,raw_log_likelihood,conditional_log_likelihood,raw_bic,conditional_bic,delta_conditional_bic,partition_constant
+two_component_shared_imf,shared schechter; in-situ logpoly3; accreted logpoly3,8,451.7218926112762,558.7045159057557,-862.5962214313478,-1076.5614680203066,0.0,106.98262329447948
+two_component_split_alpha,"shared $M_{\rm c}$, split $\alpha$; in-situ logpoly3; accreted logpoly3",9,451.73742517832625,558.7200484728057,-857.5213410915472,-1071.486587680506,5.074880339800529,106.98262329447948
+single_population,schechter + logpoly3,5,471.7166911320776,471.7166911320776,-917.9036548946523,-917.9036548946523,158.65781312565434,106.98262329447948
