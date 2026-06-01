@@ -4071,3 +4071,35 @@
   - targeted regeneration of `paper/tables/single_component_model_comparison.*`
     and `paper/figures/single_component_model_performance.pdf`
   - `cd paper && latexmk -pdf -bibtex -outdir=build main.tex`
+
+## 2026-06-01 - GitHub and Overleaf project setup
+
+### What changed
+- Initialized the local project as a Git repository on branch `main`.
+- Created the private GitHub repository:
+  - `https://github.com/vasilybelokurov/globular_clusters_imf`
+- Pushed the curated project source to GitHub, including:
+  - source package under `src/`
+  - analysis and asset scripts under `scripts/`
+  - processed catalogues under `data/processed/`
+  - manuscript source, generated manuscript figures, and generated manuscript
+    tables under `paper/`
+- Tightened `.gitignore` to exclude local caches, virtual environments, build
+  products, exploratory `tmp_*` directories, `outputs/`, and the bulky
+  `variants/` directory.
+- Cloned the newly created Overleaf project:
+  - `https://www.overleaf.com/project/6a1d5a51e0122812de3774ce`
+- Pushed a clean manuscript-only Overleaf layout containing:
+  - `main.tex`
+  - `references.bib`
+  - referenced figure PDFs in `figures/`
+  - generated table/macros inputs in `tables/`
+
+### Verification
+- Confirmed the GitHub repository was created as private and `main` was pushed.
+- Locally compiled the exact Overleaf layout with:
+  - `latexmk -pdf -interaction=nonstopmode -halt-on-error main.tex`
+- Checked the Overleaf-layout compile log for fatal errors, undefined
+  references/citations after reruns, rerun requests, and overfull boxes; none
+  were found.
+- Pushed the manuscript-only source to Overleaf `master`.
