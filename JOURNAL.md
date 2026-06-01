@@ -4103,3 +4103,24 @@
   references/citations after reruns, rerun requests, and overfull boxes; none
   were found.
 - Pushed the manuscript-only source to Overleaf `master`.
+
+## 2026-06-01 - Track local GC FITS catalogues in repository
+
+### What changed
+- Added the local GC FITS snapshots to the repository under:
+  - `data/raw/gc_catalog_updated.fits`
+  - `data/raw/gc_catalog_pinsitu.fits`
+- Changed the default catalogue paths in `src/globular_clusters_imf/catalog.py`
+  from user-home locations to the tracked repo-local FITS files.
+- Updated `README.md` so it no longer lists the old home-directory FITS paths
+  as the default inputs.
+- Regenerated the origin and chemistry summary CSV files so their source paths
+  are recorded as repo-relative paths.
+
+### Verification
+- Re-ran:
+  - `.venv/bin/python scripts/export_gc_origin_flags.py`
+  - `.venv/bin/python scripts/export_gc_chemistry_markers.py`
+  - `.venv/bin/python -m py_compile src/globular_clusters_imf/catalog.py scripts/export_gc_origin_flags.py scripts/export_gc_chemistry_markers.py`
+- Confirmed no remaining live-code, README, script, or processed-data references
+  to the old home-directory FITS paths.

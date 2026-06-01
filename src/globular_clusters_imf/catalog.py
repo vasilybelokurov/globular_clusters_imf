@@ -13,8 +13,9 @@ ORBITS_URL = "https://people.smp.uq.edu.au/HolgerBaumgardt/globular/orbits.html"
 PARAMETERS_URL = "https://people.smp.uq.edu.au/HolgerBaumgardt/globular/parameter.html"
 LOCAL_GC_UPDATED_ENVVAR = "GC_IMF_UPDATED_CATALOG_PATH"
 LOCAL_GC_PINSITU_ENVVAR = "GC_IMF_PINSITU_CATALOG_PATH"
-DEFAULT_LOCAL_GC_UPDATED_FITS = Path.home() / "data" / "catalogues" / "gc_catalog_updated.fits"
-DEFAULT_LOCAL_GC_PINSITU_FITS = Path.home() / "Documents" / "Work" / "lists" / "gc_catalog_pinsitu.fits"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_LOCAL_GC_UPDATED_FITS = PROJECT_ROOT / "data" / "raw" / "gc_catalog_updated.fits"
+DEFAULT_LOCAL_GC_PINSITU_FITS = PROJECT_ROOT / "data" / "raw" / "gc_catalog_pinsitu.fits"
 
 DEFAULT_TIMEOUT_SECONDS = 60
 SCIENTIFIC_VALUE_RE = re.compile(
@@ -137,8 +138,10 @@ def export_local_gc_origin_flags(
     summary = pd.DataFrame(
         [
             {
-                "updated_catalog_path": str(updated_path),
-                "pinsitu_catalog_path": str(pinsitu_path) if pinsitu_path is not None else "",
+                "updated_catalog_path": project_relative_path(updated_path, project_root),
+                "pinsitu_catalog_path": project_relative_path(pinsitu_path, project_root)
+                if pinsitu_path is not None
+                else "",
                 "n_clusters": len(origin_flags),
                 "n_in_situ": int(origin_flags["is_in_situ"].sum()),
                 "n_accreted": int(origin_flags["is_accreted"].sum()),
@@ -265,7 +268,7 @@ def export_local_gc_chemistry_markers(
     summary = pd.DataFrame(
         [
             {
-                "updated_catalog_path": str(updated_path),
+                "updated_catalog_path": project_relative_path(updated_path, project_root),
                 "n_clusters": len(chemistry),
                 "n_with_mgfe": int(chemistry["mgfe_combined"].notna().sum()),
                 "n_with_alfe": int(chemistry["alfe_combined"].notna().sum()),
@@ -602,6 +605,13 @@ def resolve_catalog_path(
             f"Override with the {envvar_name} environment variable if needed."
         )
     return None
+
+
+def project_relative_path(path: Path, project_root: Path) -> str:
+    try:
+        return path.resolve().relative_to(project_root.resolve()).as_posix()
+    except ValueError:
+        return str(path)
 
 
 def read_fits_table(path: Path, columns: tuple[str, ...]) -> pd.DataFrame:

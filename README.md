@@ -170,11 +170,12 @@ The current compiled draft is written to:
 The project can snapshot the local Milky Way GC in-situ/accreted classification into
 repo-managed CSV files. By default the export looks for:
 
-- `~/data/catalogues/gc_catalog_updated.fits`
-- `~/Documents/Work/lists/gc_catalog_pinsitu.fits`
+- `data/raw/gc_catalog_updated.fits`
+- `data/raw/gc_catalog_pinsitu.fits`
 
 The first file provides the current binary `FLAG`; the second, when present, adds the
-older `INSITU_PROB` values. You can override the source paths with:
+older `INSITU_PROB` values. These FITS snapshots are tracked in the repository. You can
+override the source paths with:
 
 - `GC_IMF_UPDATED_CATALOG_PATH`
 - `GC_IMF_PINSITU_CATALOG_PATH`
