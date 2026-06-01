@@ -4124,3 +4124,18 @@
   - `.venv/bin/python -m py_compile src/globular_clusters_imf/catalog.py scripts/export_gc_origin_flags.py scripts/export_gc_chemistry_markers.py`
 - Confirmed no remaining live-code, README, script, or processed-data references
   to the old home-directory FITS paths.
+
+## 2026-06-01 - Add model motivation paragraph
+
+### What changed
+- Added a short introductory paragraph at the start of Section 3 explaining the
+  physical motivation for modelling the GC catalogue in $(M_{\rm ini},a)$.
+- The paragraph connects the model to the Baumgardt initial-mass/orbit
+  reconstruction and to the broader post-Gaia Galactic archaeology context.
+- Added the Deason & Belokurov 2024 review to the bibliography.
+
+### Verification
+- Recompiled:
+  - `make -C paper pdf`
+- Checked `paper/build/main.log` for fatal errors, unresolved references or
+  citations, rerun requests, and overfull boxes; none were found.

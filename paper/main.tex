@@ -50,6 +50,8 @@ Figure~\ref{fig:catalog_overview} summarizes the working catalogue and the adopt
 
 \section{Forward model for the GC catalogue}\label{sec:selection}
 
+The motivation for the model is the strong empirical coupling between GC initial mass and present-day orbit. In the Baumgardt catalogue, the inferred initial masses of surviving Milky Way GCs vary systematically with Galactocentric position, or equivalently with orbital size $a$; this behaviour is already apparent in the discussion of \citet{Baumgardt2019} and fits naturally into the broader post-\textit{Gaia} picture of Galactic assembly reviewed by \citet{DeasonBelokurov2024}. If the Baumgardt initial-mass estimates are trusted as dynamical reconstructions, the surviving clusters provide more than a present-day mass function: they sample the original GC initial mass function down to the lowest initial masses that can still survive to the present day at each orbit size. The task is therefore to model the intrinsic distribution in $(M_{\rm ini},a)$ and then filter it by two effects. The first is dynamical survivability, which we calibrate from the survival times in the Baumgardt calculations. The second is observational detectability, which depends on present-day observables $(l,b,D_\odot,M_{\rm now})$ and is updated iteratively from the model-predicted distribution of GCs in both intrinsic and observable space.
+
 The catalogue contains both intrinsic quantities, which describe the inferred birth mass and orbit of each cluster, and present-day observables, which determine whether a surviving cluster would enter the observed sample. We denote the intrinsic coordinates by
 \begin{equation}
 x=(\log M_{\rm ini}, \log a),
