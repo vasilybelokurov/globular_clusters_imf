@@ -165,6 +165,21 @@ The current compiled draft is written to:
 
 - `paper/build/main.pdf`
 
+## Alternative Survivability Diagnostics
+
+The GG23 analytic disruption backend can be used to build diagnostic survivability
+surfaces before launching any refits:
+
+```bash
+source .venv/bin/activate
+python scripts/build_gg23_survivability_maps.py
+```
+
+This writes comparison maps and fitted `S=0.5` boundaries to `outputs/figures/`,
+and summary/boundary tables to `outputs/tables/`. The implementation follows the
+analytic mass-loss equations of Gieles & Gnedin (2023) and projects them into the
+same `(M_ini, a)` survivability format used by the fiducial Baumgardt model.
+
 ## Local GC Origin Flags
 
 The project can snapshot the local Milky Way GC in-situ/accreted classification into
