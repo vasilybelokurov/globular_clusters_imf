@@ -1,4 +1,5 @@
 .DS_Store
+JOURNAL.md
 .cache/
 .mplconfig/
 .venv/
