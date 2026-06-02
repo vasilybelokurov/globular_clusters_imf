@@ -205,6 +205,94 @@ def gg23_present_mass_msun(
     return np.where(remaining > 0.0, present, 0.0)
 
 
+def gg23_initial_mass_from_present_msun(
+    present_mass_msun: np.ndarray | float,
+    effective_radius_kpc: np.ndarray | float,
+    model: GG23DisruptionModel,
+    *,
+    gradient_radius_kpc: np.ndarray | float | None = None,
+    age_gyr: float = AGE_GYR,
+    eta_t: float = 1.0,
+    relative_tolerance: float = 1.0e-10,
+    max_iterations: int = 96,
+) -> np.ndarray:
+    """Invert the GG23 mass-loss law for the initial mass.
+
+    The lower bracket is the formal disruption threshold, where the present-day
+    mass vanishes. The upper bracket is expanded until the forward model
+    exceeds the requested present-day mass.
+    """
+
+    present_mass = np.asarray(present_mass_msun, dtype=float)
+    effective_radius = np.asarray(effective_radius_kpc, dtype=float)
+    if gradient_radius_kpc is None:
+        gradient_radius = effective_radius
+    else:
+        gradient_radius = np.asarray(gradient_radius_kpc, dtype=float)
+
+    present_mass, effective_radius, gradient_radius = np.broadcast_arrays(
+        present_mass,
+        effective_radius,
+        gradient_radius,
+    )
+    result = np.full(present_mass.shape, np.nan, dtype=float)
+    valid = (
+        np.isfinite(present_mass)
+        & np.isfinite(effective_radius)
+        & np.isfinite(gradient_radius)
+        & (present_mass > 0.0)
+        & (effective_radius > 0.0)
+        & (gradient_radius > 0.0)
+    )
+    if not np.any(valid):
+        return result
+
+    lower = gg23_survival_mass_cut_msun(
+        effective_radius[valid],
+        model,
+        gradient_radius_kpc=gradient_radius[valid],
+        age_gyr=age_gyr,
+        eta_t=eta_t,
+    )
+    lower = np.maximum(lower * (1.0 + 1.0e-12), 1.0e-8)
+    target = present_mass[valid]
+    upper = np.maximum.reduce([target * 1.25, lower * 1.25, np.full_like(target, GG23_REFERENCE_MASS_MSUN)])
+
+    for _ in range(128):
+        model_present = gg23_present_mass_msun(
+            upper,
+            effective_radius[valid],
+            model,
+            gradient_radius_kpc=gradient_radius[valid],
+            age_gyr=age_gyr,
+            eta_t=eta_t,
+        )
+        needs_expansion = model_present < target
+        if not np.any(needs_expansion):
+            break
+        upper[needs_expansion] *= 2.0
+    else:
+        raise RuntimeError("Failed to bracket GG23 initial-mass inversion.")
+
+    for _ in range(max_iterations):
+        midpoint = 0.5 * (lower + upper)
+        model_present = gg23_present_mass_msun(
+            midpoint,
+            effective_radius[valid],
+            model,
+            gradient_radius_kpc=gradient_radius[valid],
+            age_gyr=age_gyr,
+            eta_t=eta_t,
+        )
+        lower = np.where(model_present < target, midpoint, lower)
+        upper = np.where(model_present >= target, midpoint, upper)
+        if np.nanmax((upper - lower) / np.maximum(upper, 1.0)) < relative_tolerance:
+            break
+
+    result[valid] = 0.5 * (lower + upper)
+    return result
+
+
 def build_raw_gg23_survival_grid_from_catalog(
     catalog: pd.DataFrame,
     model: GG23DisruptionModel,
