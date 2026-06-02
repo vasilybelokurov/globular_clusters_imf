@@ -103,10 +103,10 @@ def gg23_omega_tid_myr_inverse(
 
 
 def gg23_radius_dependent_mass_loss_parameters(
-    effective_radius_kpc: np.ndarray | float,
+    radius_kpc: np.ndarray | float,
     model: GG23DisruptionModel,
 ) -> tuple[np.ndarray, np.ndarray]:
-    radius = np.asarray(effective_radius_kpc, dtype=float)
+    radius = np.asarray(radius_kpc, dtype=float)
     mdot_ref = np.full_like(radius, float(model.mdot_ref_msun_per_myr), dtype=float)
     y = np.full_like(radius, float(model.y), dtype=float)
 
@@ -116,24 +116,35 @@ def gg23_radius_dependent_mass_loss_parameters(
         mdot_ref = -30.0 * (1.0 + 0.5 * log_radius)
         y = (2.0 / 3.0) + (2.0 / 3.0) * log_radius
 
-    if model.past_tidal_evolution:
-        past_factor = np.ones_like(radius, dtype=float)
-        mask = radius > 4.0
-        past_factor[mask] = np.sqrt(radius[mask] / 4.0)
-        mdot_ref = mdot_ref * past_factor
-
     return mdot_ref, y
+
+
+def apply_gg23_past_tidal_multiplier(
+    mdot_ref: np.ndarray,
+    effective_radius_kpc: np.ndarray,
+    model: GG23DisruptionModel,
+) -> np.ndarray:
+    if not model.past_tidal_evolution:
+        return mdot_ref
+    multiplier = np.ones_like(effective_radius_kpc, dtype=float)
+    mask = effective_radius_kpc > 4.0
+    multiplier[mask] = np.sqrt(effective_radius_kpc[mask] / 4.0)
+    return mdot_ref * multiplier
 
 
 def gg23_total_disruption_time_gyr(
     initial_mass_msun: np.ndarray | float,
     effective_radius_kpc: np.ndarray | float,
     model: GG23DisruptionModel,
+    *,
+    gradient_radius_kpc: np.ndarray | float | None = None,
 ) -> np.ndarray:
     mass = np.asarray(initial_mass_msun, dtype=float)
     radius = np.asarray(effective_radius_kpc, dtype=float)
+    gradient_radius = radius if gradient_radius_kpc is None else np.asarray(gradient_radius_kpc, dtype=float)
     omega_tid = gg23_omega_tid_myr_inverse(radius, circular_speed_kms=model.circular_speed_kms)
-    mdot_ref, y = gg23_radius_dependent_mass_loss_parameters(radius, model)
+    mdot_ref, y = gg23_radius_dependent_mass_loss_parameters(gradient_radius, model)
+    mdot_ref = apply_gg23_past_tidal_multiplier(mdot_ref, radius, model)
     prefactor_gyr = (
         10.0
         * ((2.0 / 3.0) / y)
@@ -147,12 +158,15 @@ def gg23_survival_mass_cut_msun(
     effective_radius_kpc: np.ndarray | float,
     model: GG23DisruptionModel,
     *,
+    gradient_radius_kpc: np.ndarray | float | None = None,
     age_gyr: float = AGE_GYR,
     eta_t: float = 1.0,
 ) -> np.ndarray:
     radius = np.asarray(effective_radius_kpc, dtype=float)
+    gradient_radius = radius if gradient_radius_kpc is None else np.asarray(gradient_radius_kpc, dtype=float)
     omega_tid = gg23_omega_tid_myr_inverse(radius, circular_speed_kms=model.circular_speed_kms)
-    mdot_ref, y = gg23_radius_dependent_mass_loss_parameters(radius, model)
+    mdot_ref, y = gg23_radius_dependent_mass_loss_parameters(gradient_radius, model)
+    mdot_ref = apply_gg23_past_tidal_multiplier(mdot_ref, radius, model)
     target_age_gyr = float(age_gyr) / float(eta_t)
     prefactor_gyr = (
         10.0
@@ -169,14 +183,25 @@ def gg23_present_mass_msun(
     effective_radius_kpc: np.ndarray | float,
     model: GG23DisruptionModel,
     *,
+    gradient_radius_kpc: np.ndarray | float | None = None,
     age_gyr: float = AGE_GYR,
     eta_t: float = 1.0,
 ) -> np.ndarray:
     mass = np.asarray(initial_mass_msun, dtype=float)
+    effective_radius = np.asarray(effective_radius_kpc, dtype=float)
+    gradient_radius = (
+        effective_radius if gradient_radius_kpc is None else np.asarray(gradient_radius_kpc, dtype=float)
+    )
+    _, y = gg23_radius_dependent_mass_loss_parameters(gradient_radius, model)
     target_age_gyr = float(age_gyr) / float(eta_t)
-    t_dis = gg23_total_disruption_time_gyr(mass, effective_radius_kpc, model)
+    t_dis = gg23_total_disruption_time_gyr(
+        mass,
+        effective_radius,
+        model,
+        gradient_radius_kpc=gradient_radius_kpc,
+    )
     remaining = 1.0 - target_age_gyr / np.clip(t_dis, 1.0e-12, None)
-    present = mass * np.power(np.clip(remaining, 0.0, None), 1.0 / float(model.y))
+    present = mass * np.power(np.clip(remaining, 0.0, None), 1.0 / y)
     return np.where(remaining > 0.0, present, 0.0)
 
 
@@ -197,6 +222,7 @@ def build_raw_gg23_survival_grid_from_catalog(
     cuts = gg23_survival_mass_cut_msun(
         effective_radius,
         model,
+        gradient_radius_kpc=working["semi_major_axis_kpc"].to_numpy(dtype=float),
         age_gyr=AGE_GYR,
         eta_t=eta_t,
     )
