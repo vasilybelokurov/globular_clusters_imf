@@ -58,16 +58,21 @@ run_one() {
   } >"${outdir}/grid.log" 2>&1
 }
 
-running=0
+batch_pids=()
 for job in "${jobs[@]}"; do
   read -r output_root gg23_model radial_model <<<"$job"
   run_one "$output_root" "$gg23_model" "$radial_model" &
-  running=$((running + 1))
-  if [[ "$running" -ge "$MAX_JOBS" ]]; then
-    wait -n
-    running=$((running - 1))
+  batch_pids+=("$!")
+  if [[ "${#batch_pids[@]}" -ge "$MAX_JOBS" ]]; then
+    for pid in "${batch_pids[@]}"; do
+      wait "$pid"
+    done
+    batch_pids=()
   fi
 done
 
-wait
+for pid in "${batch_pids[@]}"; do
+  wait "$pid"
+done
+
 echo "All GG23 grid jobs finished at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
