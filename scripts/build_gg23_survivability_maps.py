@@ -19,6 +19,8 @@ from matplotlib.colors import LinearSegmentedColormap
 from globular_clusters_imf.gg23_survivability import (  # noqa: E402
     GG23_MODELS,
     build_gg23_survivability_grid,
+    effective_radius_kpc_from_semimajor_axis,
+    gg23_initial_mass_from_present_msun,
 )
 from globular_clusters_imf.joint_model import centers_to_edges_local  # noqa: E402
 from globular_clusters_imf.smooth_survivability import build_smooth_survivability_grid  # noqa: E402
@@ -67,12 +69,21 @@ def main() -> None:
 
     write_summary_tables(all_grids, labels, tables_dir)
     write_grid_archive(all_grids, tables_dir / "gg23_survivability_surface_grids.npz")
+    model_mass_points = build_model_specific_point_masses(catalog, tables_dir)
     plot_survivability_maps(
         catalog,
         all_grids,
         labels,
         figures_dir / "gg23_survivability_maps.pdf",
         figures_dir / "gg23_survivability_maps.png",
+    )
+    plot_survivability_maps(
+        catalog,
+        all_grids,
+        labels,
+        figures_dir / "gg23_survivability_maps_model_mini.pdf",
+        figures_dir / "gg23_survivability_maps_model_mini.png",
+        log_mass_points_by_model=model_mass_points,
     )
     plot_boundary_comparison(
         catalog,
@@ -83,6 +94,7 @@ def main() -> None:
     )
 
     print(f"Wrote {figures_dir / 'gg23_survivability_maps.pdf'}")
+    print(f"Wrote {figures_dir / 'gg23_survivability_maps_model_mini.pdf'}")
     print(f"Wrote {figures_dir / 'gg23_survivability_boundary_comparison.pdf'}")
     print(f"Wrote {tables_dir / 'gg23_survivability_model_summary.csv'}")
 
@@ -155,12 +167,61 @@ def write_grid_archive(grids: dict[str, dict[str, object]], output_path: Path) -
     np.savez_compressed(output_path, **payload)
 
 
+def build_model_specific_point_masses(
+    catalog: pd.DataFrame,
+    tables_dir: Path,
+) -> dict[str, np.ndarray]:
+    point_masses: dict[str, np.ndarray] = {
+        "baumgardt2019": catalog["log_initial_mass_msun"].to_numpy(dtype=float),
+    }
+    semi_major_axis = catalog["semi_major_axis_kpc"].to_numpy(dtype=float)
+    effective_radius = effective_radius_kpc_from_semimajor_axis(
+        semi_major_axis,
+        catalog["eccentricity"].to_numpy(dtype=float),
+    )
+    present_mass = catalog["present_mass_msun"].to_numpy(dtype=float)
+    rows = []
+    for name in DEFAULT_MODEL_NAMES:
+        initial_mass = gg23_initial_mass_from_present_msun(
+            present_mass,
+            effective_radius,
+            GG23_MODELS[name],
+            gradient_radius_kpc=semi_major_axis,
+        )
+        log_initial_mass = np.log10(initial_mass)
+        point_masses[name] = log_initial_mass
+        rows.append(
+            pd.DataFrame(
+                {
+                    "cluster_label": catalog["cluster_label"].to_numpy(),
+                    "model_name": name,
+                    "model_label": GG23_MODELS[name].label,
+                    "semi_major_axis_kpc": semi_major_axis,
+                    "effective_radius_kpc": effective_radius,
+                    "present_mass_msun": present_mass,
+                    "log10_panel_initial_mass_msun": log_initial_mass,
+                    "panel_initial_mass_msun": initial_mass,
+                    "baumgardt_log10_initial_mass_msun": catalog["log_initial_mass_msun"].to_numpy(dtype=float),
+                    "delta_log10_initial_mass_vs_baumgardt": log_initial_mass
+                    - catalog["log_initial_mass_msun"].to_numpy(dtype=float),
+                }
+            )
+        )
+    pd.concat(rows, ignore_index=True).to_csv(
+        tables_dir / "gg23_survivability_model_mini_panel_points.csv",
+        index=False,
+    )
+    return point_masses
+
+
 def plot_survivability_maps(
     catalog: pd.DataFrame,
     grids: dict[str, dict[str, object]],
     labels: dict[str, str],
     pdf_path: Path,
     png_path: Path,
+    *,
+    log_mass_points_by_model: dict[str, np.ndarray] | None = None,
 ) -> None:
     ordered_names = list(grids)
     fig, axes = plt.subplots(2, 3, figsize=(12.8, 7.4), sharex=True, sharey=True, constrained_layout=True)
@@ -170,9 +231,13 @@ def plot_survivability_maps(
         [(0.98, 0.98, 0.98), (0.76, 0.84, 0.92), (0.14, 0.35, 0.63)],
     )
     log_a_points = np.log10(catalog["semi_major_axis_kpc"].to_numpy(dtype=float))
-    log_m_points = catalog["log_initial_mass_msun"].to_numpy(dtype=float)
     mesh = None
     for ax, name in zip(axes, ordered_names, strict=False):
+        log_m_points = (
+            log_mass_points_by_model[name]
+            if log_mass_points_by_model is not None and name in log_mass_points_by_model
+            else catalog["log_initial_mass_msun"].to_numpy(dtype=float)
+        )
         grid = grids[name]
         log_a = np.asarray(grid["log_a_grid"], dtype=float)
         log_m = np.asarray(grid["log_mass_grid"], dtype=float)
