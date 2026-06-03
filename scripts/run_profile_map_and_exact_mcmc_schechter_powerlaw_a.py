@@ -122,10 +122,135 @@ def _failure_row(theta: np.ndarray, stage: str, message: str, radial_model: str)
         "input_alpha_dndm": alpha,
         "input_log10_m_c_msun": log_mc,
         "surface_model": SURFACE_MODEL,
+        "survivability_backend": "baumgardt",
+        "gg23_model_name": "",
+        "gg23_model_label": "",
+        "gg23_mini_eta_t_dependent": False,
+        "max_abs_present_mass_residual_fraction": np.nan,
         "stage": stage,
         "status": "failed",
         "failure_message": message,
     }
+
+
+def _catalog_and_survival_grid_for_theta(
+    *,
+    prepared_catalog: pd.DataFrame,
+    eta_t: float,
+    survivability_backend: str,
+    gg23_model_name: str | None,
+) -> tuple[pd.DataFrame, dict[str, object], dict[str, object]]:
+    if survivability_backend == "baumgardt":
+        from globular_clusters_imf.smooth_survivability import build_smooth_survivability_grid
+
+        smooth_survival = build_smooth_survivability_grid(
+            prepared_catalog,
+            eta_t=eta_t,
+            surface_model=SURFACE_MODEL,
+        )
+        metadata = {
+            "survivability_backend": "baumgardt",
+            "gg23_model_name": "",
+            "gg23_model_label": "",
+            "gg23_mini_eta_t_dependent": False,
+            "max_abs_present_mass_residual_fraction": np.nan,
+        }
+        return prepared_catalog, smooth_survival, metadata
+
+    if survivability_backend != "gg23":
+        raise ValueError(f"Unknown survivability backend: {survivability_backend!r}")
+    if not gg23_model_name:
+        raise ValueError("--gg23-model is required when --survivability-backend=gg23")
+
+    from globular_clusters_imf.gg23_survivability import (
+        GG23_MODELS,
+        build_gg23_survivability_grid,
+        effective_radius_kpc_from_semimajor_axis,
+        gg23_initial_mass_from_present_msun,
+        gg23_present_mass_msun,
+        gg23_survival_mass_cut_msun,
+    )
+    from globular_clusters_imf.model import AGE_GYR
+
+    if gg23_model_name not in GG23_MODELS:
+        raise ValueError(f"Unknown GG23 model {gg23_model_name!r}. Available: {sorted(GG23_MODELS)}")
+
+    model = GG23_MODELS[gg23_model_name]
+    working = prepared_catalog.copy()
+    semi_major_axis = working["semi_major_axis_kpc"].to_numpy(dtype=float)
+    eccentricity = working["eccentricity"].to_numpy(dtype=float)
+    present_mass = working["present_mass_msun"].to_numpy(dtype=float)
+    effective_radius = effective_radius_kpc_from_semimajor_axis(semi_major_axis, eccentricity)
+    gg23_initial_mass = gg23_initial_mass_from_present_msun(
+        present_mass,
+        effective_radius,
+        model,
+        gradient_radius_kpc=semi_major_axis,
+        age_gyr=AGE_GYR,
+        eta_t=float(eta_t),
+    )
+    reconstructed_present_mass = gg23_present_mass_msun(
+        gg23_initial_mass,
+        effective_radius,
+        model,
+        gradient_radius_kpc=semi_major_axis,
+        age_gyr=AGE_GYR,
+        eta_t=float(eta_t),
+    )
+    survival_cut = gg23_survival_mass_cut_msun(
+        effective_radius,
+        model,
+        gradient_radius_kpc=semi_major_axis,
+        age_gyr=AGE_GYR,
+        eta_t=float(eta_t),
+    )
+    valid = (
+        np.isfinite(gg23_initial_mass)
+        & np.isfinite(survival_cut)
+        & (gg23_initial_mass > 0.0)
+        & (survival_cut > 0.0)
+        & np.isfinite(semi_major_axis)
+        & (semi_major_axis > 0.0)
+    )
+    if not np.all(valid):
+        working = working.loc[valid].copy()
+        semi_major_axis = semi_major_axis[valid]
+        present_mass = present_mass[valid]
+        effective_radius = effective_radius[valid]
+        gg23_initial_mass = gg23_initial_mass[valid]
+        reconstructed_present_mass = reconstructed_present_mass[valid]
+        survival_cut = survival_cut[valid]
+
+    working["baumgardt_initial_mass_msun"] = working["initial_mass_msun"].to_numpy(dtype=float)
+    working["baumgardt_log_initial_mass_msun"] = working["log_initial_mass_msun"].to_numpy(dtype=float)
+    working["initial_mass_msun"] = gg23_initial_mass
+    working["log_initial_mass_msun"] = np.log10(gg23_initial_mass)
+    working["gg23_effective_radius_kpc"] = effective_radius
+    working["gg23_model_name"] = gg23_model_name
+    working["gg23_model_label"] = model.label
+    working["gg23_survival_mass_cut_msun"] = survival_cut
+    working["log_gg23_survival_mass_cut_msun"] = np.log10(survival_cut)
+    working["log_survival_mass_cut_msun"] = np.log10(survival_cut)
+    working["gg23_mass_loss_fraction"] = 1.0 - present_mass / gg23_initial_mass
+    working["gg23_reconstructed_present_mass_msun"] = reconstructed_present_mass
+    working["gg23_present_mass_residual_fraction"] = (reconstructed_present_mass - present_mass) / present_mass
+
+    smooth_survival = build_gg23_survivability_grid(
+        working,
+        model,
+        eta_t=float(eta_t),
+        surface_model=SURFACE_MODEL,
+    )
+    metadata = {
+        "survivability_backend": "gg23",
+        "gg23_model_name": gg23_model_name,
+        "gg23_model_label": model.label,
+        "gg23_mini_eta_t_dependent": True,
+        "max_abs_present_mass_residual_fraction": float(
+            np.nanmax(np.abs(working["gg23_present_mass_residual_fraction"].to_numpy(dtype=float)))
+        ),
+    }
+    return working, smooth_survival, metadata
 
 
 def _evaluate_theta_single_start(
@@ -135,18 +260,20 @@ def _evaluate_theta_single_start(
     theta: np.ndarray,
     start_state: dict[str, np.ndarray] | None,
     project_root: Path,
+    survivability_backend: str,
+    gg23_model_name: str | None,
 ) -> dict[str, object]:
     from globular_clusters_imf.detectability_longitude_model import fit_single_component_detectability_em_with_abs_longitude
-    from globular_clusters_imf.smooth_survivability import build_smooth_survivability_grid
 
     eta_t, alpha, log_mc = [float(value) for value in theta]
-    smooth_survival = build_smooth_survivability_grid(
-        prepared_catalog,
+    working_catalog, smooth_survival, metadata = _catalog_and_survival_grid_for_theta(
+        prepared_catalog=prepared_catalog,
         eta_t=eta_t,
-        surface_model=SURFACE_MODEL,
+        survivability_backend=survivability_backend,
+        gg23_model_name=gg23_model_name,
     )
     result = fit_single_component_detectability_em_with_abs_longitude(
-        prepared_catalog,
+        working_catalog,
         project_root=project_root,
         spec=spec,
         n_iterations=N_DETECTABILITY_ITERATIONS,
@@ -170,6 +297,7 @@ def _evaluate_theta_single_start(
     row["input_alpha_dndm"] = alpha
     row["input_log10_m_c_msun"] = log_mc
     row["surface_model"] = SURFACE_MODEL
+    row.update(metadata)
     row["status"] = "ok"
     row["failure_message"] = ""
     return {
@@ -208,6 +336,8 @@ def _evaluate_theta_multistart(
     stage: str,
     project_root: Path,
     anchor_start_state: dict[str, np.ndarray] | None,
+    survivability_backend: str,
+    gg23_model_name: str | None,
 ) -> dict[str, object]:
     start_candidates = [None]
     if anchor_start_state is not None:
@@ -224,6 +354,8 @@ def _evaluate_theta_multistart(
                 theta=theta,
                 start_state=start_state,
                 project_root=project_root,
+                survivability_backend=survivability_backend,
+                gg23_model_name=gg23_model_name,
             )
         except Exception as exc:
             failure_messages.append(type(exc).__name__ + ": " + str(exc))
@@ -237,7 +369,11 @@ def _evaluate_theta_multistart(
         return {
             "theta": np.asarray(theta, dtype=float),
             "log_posterior": -np.inf,
-            "row": _failure_row(theta, stage=stage, message=" | ".join(failure_messages), radial_model=spec.radial_model),
+            "row": {
+                **_failure_row(theta, stage=stage, message=" | ".join(failure_messages), radial_model=spec.radial_model),
+                "survivability_backend": survivability_backend,
+                "gg23_model_name": "" if gg23_model_name is None else str(gg23_model_name),
+            },
             "result": None,
             "start_state": None,
         }
@@ -548,6 +684,8 @@ def _run_exact_mcmc_chain_worker(
     widths: np.ndarray,
     initial_entry: dict[str, object],
     fixed_anchor_library: list[dict[str, object]],
+    survivability_backend: str,
+    gg23_model_name: str | None,
     surface_output_path: str | None = None,
     surface_burn_in: int = 0,
     surface_thin: int = 1,
@@ -586,6 +724,8 @@ def _run_exact_mcmc_chain_worker(
                     stage="mcmc",
                     project_root=project_root,
                     anchor_start_state=anchor_state,
+                    survivability_backend=survivability_backend,
+                    gg23_model_name=gg23_model_name,
                 )
                 proposal_surface = _surface_payload_from_result(proposal_exact["result"]) if proposal_exact.get("result") is not None else None
                 proposal_entry = _lightweight_entry(proposal_exact)
@@ -621,6 +761,8 @@ def _run_exact_mcmc_chain_worker(
                     stage="surface_archive",
                     project_root=project_root,
                     anchor_start_state=current.get("start_state"),
+                    survivability_backend=survivability_backend,
+                    gg23_model_name=gg23_model_name,
                 )
                 current_surface = _surface_payload_from_result(surface_entry["result"]) if surface_entry.get("result") is not None else None
             if current_surface is not None:
@@ -770,6 +912,25 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output-root-name", default="profile_map_and_exact_mcmc_schechter_powerlaw_a_logistic")
     parser.add_argument(
+        "--survivability-backend",
+        default="baumgardt",
+        choices=["baumgardt", "gg23"],
+        help="Dynamical survivability backend. GG23 also recomputes catalogue M_ini at each eta_t.",
+    )
+    parser.add_argument(
+        "--gg23-model",
+        default="",
+        choices=[
+            "",
+            "gg23_no_bh",
+            "gg23_bh",
+            "gg23_bh_feh_gradient",
+            "gg23_bh_past_tidal",
+            "gg23_bh_feh_gradient_past_tidal",
+        ],
+        help="GG23 disruption variant used when --survivability-backend=gg23.",
+    )
+    parser.add_argument(
         "--radial-model",
         default="powerlaw_a",
         choices=["powerlaw_a", "cored_powerlaw_a", "logpoly3", "step5"],
@@ -802,6 +963,10 @@ def main() -> None:
     parser.add_argument("--mcmc-adapt-every", type=int, default=20)
     parser.add_argument("--mcmc-seed", type=int, default=20260527)
     args = parser.parse_args()
+    if str(args.survivability_backend) == "gg23" and not str(args.gg23_model):
+        parser.error("--gg23-model is required when --survivability-backend=gg23")
+    if str(args.survivability_backend) != "gg23" and str(args.gg23_model):
+        parser.error("--gg23-model can only be used with --survivability-backend=gg23")
 
     output_root = PROJECT_ROOT / "variants" / args.output_root_name
     figures_dir = output_root / "outputs" / "figures"
@@ -861,6 +1026,8 @@ def main() -> None:
                         stage="coarse",
                         project_root=output_root,
                         anchor_start_state=None,
+                        survivability_backend=str(args.survivability_backend),
+                        gg23_model_name=str(args.gg23_model) or None,
                     )
                     evaluation_cache[key] = entry
                 coarse_entries.append(entry)
@@ -935,6 +1102,8 @@ def main() -> None:
                             stage=f"refined_pass_{pass_index + 1}",
                             project_root=output_root,
                             anchor_start_state=anchor_state,
+                            survivability_backend=str(args.survivability_backend),
+                            gg23_model_name=str(args.gg23_model) or None,
                         )
                         evaluation_cache[key] = entry
                     current_entries.append(entry)
@@ -987,6 +1156,9 @@ def main() -> None:
     if bool(args.skip_mcmc):
         summary_payload = {
             "surface_model": SURFACE_MODEL,
+            "survivability_backend": str(args.survivability_backend),
+            "gg23_model_name": str(args.gg23_model),
+            "gg23_mini_eta_t_dependent": bool(str(args.survivability_backend) == "gg23"),
             "model_spec": {"imf_family": spec.imf_family, "radial_model": spec.radial_model},
             "n_detectability_iterations": N_DETECTABILITY_ITERATIONS,
             "coarse_grid_spec": coarse_spec.__dict__,
@@ -1066,6 +1238,8 @@ def main() -> None:
                 widths=widths,
                 initial_entry=parallel_inputs[chain_id],
                 fixed_anchor_library=fixed_anchor_library_light,
+                survivability_backend=str(args.survivability_backend),
+                gg23_model_name=str(args.gg23_model) or None,
             ): chain_id
             for chain_id in range(n_chains)
         }
@@ -1159,11 +1333,16 @@ def main() -> None:
         stage="mcmc_best",
         project_root=output_root,
         anchor_start_state=best_mcmc_anchor,
+        survivability_backend=str(args.survivability_backend),
+        gg23_model_name=str(args.gg23_model) or None,
     )
     _save_best_payload(best_mcmc_entry, tables_dir, prefix="mcmc")
 
     summary_payload = {
         "surface_model": SURFACE_MODEL,
+        "survivability_backend": str(args.survivability_backend),
+        "gg23_model_name": str(args.gg23_model),
+        "gg23_mini_eta_t_dependent": bool(str(args.survivability_backend) == "gg23"),
         "model_spec": {"imf_family": spec.imf_family, "radial_model": spec.radial_model},
         "n_detectability_iterations": N_DETECTABILITY_ITERATIONS,
         "coarse_grid_spec": coarse_spec.__dict__,

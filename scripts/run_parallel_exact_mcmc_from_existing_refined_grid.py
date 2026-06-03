@@ -74,6 +74,8 @@ def _build_exact_anchor_entries(
     refined_bounds: np.ndarray,
     anchor_k: int,
     anchor_pool: int,
+    survivability_backend: str,
+    gg23_model_name: str | None,
 ) -> list[dict[str, object]]:
     dummy_entries = _dummy_entries_from_table(refined_table)
     candidate_entries = _select_diverse_entries(
@@ -94,6 +96,8 @@ def _build_exact_anchor_entries(
             stage='parallel_anchor',
             project_root=project_root,
             anchor_start_state=anchor_state,
+            survivability_backend=survivability_backend,
+            gg23_model_name=gg23_model_name,
         )
         exact_entries.append(exact_entry)
     return exact_entries
@@ -122,6 +126,19 @@ def main() -> None:
     parser.add_argument('--source-output-root-name', default='profile_map_and_exact_mcmc_schechter_powerlaw_a_logistic_parallel_long')
     parser.add_argument('--output-root-name', default='')
     parser.add_argument('--radial-model', default='', choices=['', 'powerlaw_a', 'cored_powerlaw_a', 'logpoly3', 'step5'])
+    parser.add_argument('--survivability-backend', default='', choices=['', 'baumgardt', 'gg23'])
+    parser.add_argument(
+        '--gg23-model',
+        default='',
+        choices=[
+            '',
+            'gg23_no_bh',
+            'gg23_bh',
+            'gg23_bh_feh_gradient',
+            'gg23_bh_past_tidal',
+            'gg23_bh_feh_gradient_past_tidal',
+        ],
+    )
     parser.add_argument('--mcmc-chains', type=int, default=6)
     parser.add_argument('--mcmc-steps', type=int, default=900)
     parser.add_argument('--mcmc-burn', type=int, default=300)
@@ -149,14 +166,26 @@ def main() -> None:
     refined_table = pd.read_csv(tables_dir / 'refined_grid_results.csv')
     summary_path = tables_dir / 'summary.json'
     radial_model = 'powerlaw_a'
+    survivability_backend = 'baumgardt'
+    gg23_model_name = ''
     if summary_path.exists():
         try:
             summary = json.loads(summary_path.read_text())
             radial_model = summary.get('model_spec', {}).get('radial_model', radial_model)
+            survivability_backend = summary.get('survivability_backend', survivability_backend)
+            gg23_model_name = summary.get('gg23_model_name', gg23_model_name)
         except Exception:
             pass
     if args.radial_model:
         radial_model = args.radial_model
+    if args.survivability_backend:
+        survivability_backend = args.survivability_backend
+    if args.gg23_model:
+        gg23_model_name = args.gg23_model
+    if survivability_backend == 'gg23' and not gg23_model_name:
+        raise ValueError('--gg23-model is required when using GG23 survivability.')
+    if survivability_backend != 'gg23':
+        gg23_model_name = ''
     refined_best_row = refined_table.loc[refined_table['log_likelihood'].idxmax()].to_dict()
     refined_bounds = np.array([
         [float(refined_table['eta_t'].min()), float(refined_table['eta_t'].max())],
@@ -176,6 +205,8 @@ def main() -> None:
         refined_bounds=refined_bounds,
         anchor_k=int(args.anchor_k),
         anchor_pool=int(args.anchor_pool),
+        survivability_backend=survivability_backend,
+        gg23_model_name=gg23_model_name or None,
     )
     lightweight_anchors = [_lightweight_entry(entry, include_surfaces=True) for entry in exact_anchor_entries]
     chain_start_entries = _select_diverse_entries(
@@ -202,6 +233,8 @@ def main() -> None:
             'widths': widths,
             'initial_entry': _lightweight_entry(chain_start_entries[chain_id], include_surfaces=True),
             'fixed_anchor_library': lightweight_anchors,
+            'survivability_backend': survivability_backend,
+            'gg23_model_name': gg23_model_name or None,
             'surface_output_path': str(worker_dir / f'chain_{chain_id}_selection_surfaces.npz'),
             'surface_burn_in': int(args.mcmc_burn),
             'surface_thin': int(args.mcmc_thin),
@@ -318,12 +351,17 @@ def main() -> None:
         stage='exact_parallel_mcmc_best',
         project_root=output_root,
         anchor_start_state=best_anchor,
+        survivability_backend=survivability_backend,
+        gg23_model_name=gg23_model_name or None,
     )
     _save_best_payload(best_entry, tables_dir, prefix='exact_parallel_mcmc')
 
     summary = {
         'source_output_root_name': args.source_output_root_name,
         'output_root_name': output_root_name,
+        'survivability_backend': survivability_backend,
+        'gg23_model_name': gg23_model_name,
+        'gg23_mini_eta_t_dependent': bool(survivability_backend == 'gg23'),
         'sampler': 'exact_profiled_random_walk_metropolis_subprocess_parallel',
         'n_chains': int(args.mcmc_chains),
         'n_steps': int(args.mcmc_steps),
