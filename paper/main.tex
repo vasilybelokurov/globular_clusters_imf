@@ -280,6 +280,8 @@ The radial model comparison is shown in Figure~\ref{fig:single_component_radial_
     \label{fig:single_component_radial_profile}
 \end{figure*}
 
+\clearpage
+
 \section{Two-component model with Belokurov--Kravtsov labels}\label{sec:two_component}
 We next fit a labelled two-component extension using the in-situ/accreted assignments of \citet{BelokurovKravtsov2024}. The labels are treated as fixed data, not inferred mixture memberships. Thus the model asks whether the same IMF, filtered through two different radial birth profiles, gives a better description of the labelled catalogue.
 
@@ -336,6 +338,102 @@ The useful new information is the decomposition of this lower bound. The accrete
         \input{tables/two_component_results.tex}
     \end{tabular}
 \end{table*}
+
+\clearpage
+
+\section{Initial masses under the Gieles--Gnedin disruption law}\label{sec:gg23_masses}
+The preceding inference uses the Baumgardt initial masses and the Baumgardt-based survivability surface as the baseline coordinate system. It is useful to ask how much of the result depends on that particular disruption calibration. As a first controlled comparison, we recompute the cluster initial masses and survivability boundaries using the analytic mass-loss law of \citet{GielesGnedin2023}, hereafter GG23.
+
+GG23 write the evaporation-driven mass-loss rate as
+\begin{equation}
+\dot{M}
+=
+\dot{M}_{\rm ref}
+\left(\frac{M}{M_{\rm ini}}\right)^{1-y}
+\left(\frac{M_{\rm ini}}{2\times10^5\,{\rm M}_\odot}\right)^{1-x}
+\frac{\Omega_{\rm tid}}{0.32\,{\rm Myr}^{-1}},
+\end{equation}
+with $x=2/3$. Integrating this law gives
+\begin{equation}
+M(t)=M_{\rm ini}
+\left[
+1-\frac{t}{t_{\rm dis}(M_{\rm ini},\Omega_{\rm tid})}
+\right]^{1/y},
+\end{equation}
+where
+\begin{equation}
+\begin{aligned}
+t_{\rm dis}
+&=
+10\,{\rm Gyr}\,
+\frac{2/3}{y}\,
+\frac{30\,{\rm M}_\odot\,{\rm Myr}^{-1}}{|\dot{M}_{\rm ref}|}\,
+\frac{0.32\,{\rm Myr}^{-1}}{\Omega_{\rm tid}}\\
+&\quad\times
+\left(\frac{M_{\rm ini}}{2\times10^5\,{\rm M}_\odot}\right)^x .
+\end{aligned}
+\end{equation}
+We have checked this implementation against the public \texttt{evgcmf.py} code associated with GG23: for fixed $M_{\rm ini}$, gradient radius, and effective tidal radius, the local calculation agrees with the GG23 equations at machine precision for the survival threshold, disruption time, and evolved present-day mass.
+
+To apply this law to the Milky Way catalogue we need a two-dimensional projection into the same $(M_{\rm ini},a)$ plane used throughout the paper. For each cluster we approximate the effective tidal radius by
+\begin{equation}
+R_{\rm eff}=a(1-e^2),
+\end{equation}
+equivalent to $R_p(1+e)$ for an orbit with semimajor axis $a$ and eccentricity $e$. The tidal frequency is then scaled as $\Omega_{\rm tid}=0.32\,{\rm Myr}^{-1}(R_{\rm eff}/{\rm kpc})^{-1}$ for the reference circular speed $V_c=220\,{\rm km\,s^{-1}}$. For the GG23 metallicity-gradient variants we use the GG23 radial prescription,
+\begin{align}
+\dot{M}_{\rm ref}(R)&=-30\,{\rm M}_\odot\,{\rm Myr}^{-1}
+\left[1+\frac{1}{2}\log_{10}\left(\frac{R}{{\rm kpc}}\right)\right],\\
+y(R)&=\frac{2}{3}+\frac{2}{3}\log_{10}\left(\frac{R}{{\rm kpc}}\right),
+\end{align}
+for $R<10\,{\rm kpc}$, and $\dot{M}_{\rm ref}=-45\,{\rm M}_\odot\,{\rm Myr}^{-1}$, $y=4/3$ at larger radii. In the projected catalogue calculation we set this gradient radius to $R\simeq a$. For the past-tidal-evolution variants we multiply $|\dot{M}_{\rm ref}|$ by $(R_{\rm eff}/4\,{\rm kpc})^{1/2}$ when $R_{\rm eff}>4\,{\rm kpc}$, following GG23.
+
+For each observed cluster and each GG23 variant, we infer an alternative initial mass by solving
+\begin{equation}
+M_{\rm now}
+=
+M_{\rm ini}^{\rm GG23}
+\left[
+1-\frac{12\,{\rm Gyr}}
+{t_{\rm dis}(M_{\rm ini}^{\rm GG23},R_{\rm eff},R)}
+\right]^{1/y(R)}
+\end{equation}
+for $M_{\rm ini}^{\rm GG23}$. This scalar inversion is monotonic above the disruption threshold, so a bracketed numerical solve is stable. Forward-evolving the recovered masses returns the observed present-day masses with fractional residuals below $1.5\times10^{-9}$ for all five GG23 variants.
+
+Figure~\ref{fig:gg23_initial_mass_comparison} compares these GG23 initial masses to the Baumgardt values. The no-BH prescription gives systematically smaller initial masses, with a median offset of about $-0.34$ dex relative to Baumgardt. The BH-only and BH-plus-past-tides prescriptions are closer to Baumgardt, while the metallicity-gradient prescriptions reduce the inferred masses again for much of the catalogue. The comparison should not be read as a new fit to the Milky Way GC IMF; it is a controlled coordinate transformation of the observed catalogue under several disruption laws.
+
+\begin{figure*}
+    \centering
+    \includegraphics[width=\textwidth]{figures/gg23_initial_mass_model_comparison.pdf}
+    \caption{Initial masses inferred by inverting the GG23 mass-loss law for the observed Milky Way GCs. Left: GG23-derived initial masses compared to the Baumgardt initial masses. The dashed line marks equality. Right: median and central 68 per cent range of $\Delta\log_{10}M_{\rm ini}=\log_{10}M_{\rm ini}^{\rm GG23}-\log_{10}M_{\rm ini}^{\rm Baumgardt}$ for each GG23 variant.}
+    \label{fig:gg23_initial_mass_comparison}
+\end{figure*}
+
+We compute the corresponding GG23 survivability boundaries independently of the plotted points. For each cluster orbit we find the limiting mass $M_{\rm cut}$ satisfying
+\begin{equation}
+t_{\rm dis}(M_{\rm cut},R_{\rm eff},R)=12\,{\rm Gyr}.
+\end{equation}
+At each value of $\log a$ we then average the orbit-by-orbit survival indicators with a Gaussian kernel in $\log a$ of width $0.18$ dex:
+\begin{equation}
+S_{\rm raw}(m,a)
+=
+\left\langle
+{\bf 1}\left[m\ge \log_{10}M_{\rm cut}\right]
+\right\rangle_{\log a},
+\qquad
+m=\log_{10}M_{\rm ini}.
+\end{equation}
+Finally, we fit the same monotonic logistic-tail representation used for the Baumgardt survivability surface. The thick contours in Figure~\ref{fig:gg23_survivability_model_mini} are the fitted $S=0.5$ boundaries, while the thin contours show $S=0.1$ and $S=0.9$.
+
+The important point is that Figure~\ref{fig:gg23_survivability_model_mini} changes only the dynamical mass-loss calibration. The background in each GG23 panel is the survivability implied by that GG23 law and the observed orbit distribution; the points in that panel are the same observed clusters, but plotted at the $M_{\rm ini}$ recovered from that same GG23 law. The surface is therefore not fitted to the plotted point cloud. It is the forward survival probability surface through which those transformed points would be observed.
+
+\begin{figure*}
+    \centering
+    \includegraphics[width=\textwidth]{figures/gg23_survivability_maps_model_mini.pdf}
+    \caption{Survivability surfaces under the Baumgardt and GG23 disruption calibrations. The Baumgardt panel uses the Baumgardt initial masses. Each GG23 panel uses initial masses obtained by inverting the corresponding GG23 mass-loss law for the observed present-day cluster mass and orbit. In all panels the background colour gives the fitted survivability surface $S(M_{\rm ini},a)$, the thick black curve marks $S=0.5$, and the thin curves mark $S=0.1$ and $S=0.9$.}
+    \label{fig:gg23_survivability_model_mini}
+\end{figure*}
+
+\clearpage
 
 \section{Discussion}\label{sec:discussion}
 

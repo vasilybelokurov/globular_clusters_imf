@@ -57,11 +57,14 @@ def main() -> None:
 
     plot_comparison(long_table, figures_dir / "gg23_initial_mass_estimates_comparison.pdf")
     plot_comparison(long_table, figures_dir / "gg23_initial_mass_estimates_comparison.png")
+    plot_paper_comparison(long_table, figures_dir / "gg23_initial_mass_model_comparison.pdf")
+    plot_paper_comparison(long_table, figures_dir / "gg23_initial_mass_model_comparison.png")
 
     print(f"Wrote {long_path}")
     print(f"Wrote {wide_path}")
     print(f"Wrote {summary_path}")
     print(f"Wrote {figures_dir / 'gg23_initial_mass_estimates_comparison.pdf'}")
+    print(f"Wrote {figures_dir / 'gg23_initial_mass_model_comparison.pdf'}")
 
 
 def build_long_table(catalog: pd.DataFrame) -> pd.DataFrame:
@@ -252,6 +255,80 @@ def plot_comparison(long_table: pd.DataFrame, output_path: Path) -> None:
     axes[1].axhline(0.0, color="black", linewidth=1.0, linestyle="--")
     axes[1].set_xlabel(r"$\log_{10}(a/{\rm kpc})$")
     axes[1].set_ylabel(r"GG23 - Baumgardt $\Delta\log_{10}M_{\rm ini}$")
+    fig.savefig(output_path, dpi=200 if output_path.suffix.lower() == ".png" else None)
+    plt.close(fig)
+
+
+def plot_paper_comparison(long_table: pd.DataFrame, output_path: Path) -> None:
+    labels = {name: GG23_MODELS[name].label for name in DEFAULT_MODEL_NAMES}
+    colors = {
+        "gg23_no_bh": "#1b9e77",
+        "gg23_bh": "#d95f02",
+        "gg23_bh_feh_gradient": "#7570b3",
+        "gg23_bh_past_tidal": "#e7298a",
+        "gg23_bh_feh_gradient_past_tidal": "#66a61e",
+    }
+
+    fig, axes = plt.subplots(1, 2, figsize=(8.8, 3.8), constrained_layout=True)
+    for model_name, group in long_table.groupby("gg23_model_name", sort=False):
+        axes[0].scatter(
+            group["log_initial_mass_msun"],
+            group["log10_gg23_initial_mass_msun"],
+            s=10,
+            alpha=0.45,
+            linewidths=0.0,
+            color=colors[model_name],
+            label=labels[model_name],
+        )
+    mass_limits = [
+        min(long_table["log_initial_mass_msun"].min(), long_table["log10_gg23_initial_mass_msun"].min()) - 0.1,
+        max(long_table["log_initial_mass_msun"].max(), long_table["log10_gg23_initial_mass_msun"].max()) + 0.1,
+    ]
+    axes[0].plot(mass_limits, mass_limits, color="black", linewidth=1.0, linestyle="--")
+    axes[0].set_xlim(mass_limits)
+    axes[0].set_ylim(mass_limits)
+    axes[0].set_xlabel(r"Baumgardt $\log_{10}(M_{\rm ini}/{\rm M}_\odot)$")
+    axes[0].set_ylabel(r"GG23 $\log_{10}(M_{\rm ini}/{\rm M}_\odot)$")
+    axes[0].legend(loc="upper left", fontsize=6.6, frameon=False)
+
+    summary_rows = []
+    for model_name, group in long_table.groupby("gg23_model_name", sort=False):
+        delta = group["gg23_minus_baumgardt_log10_initial_mass_dex"]
+        summary_rows.append(
+            {
+                "model_name": model_name,
+                "label": labels[model_name],
+                "median": float(delta.median()),
+                "p16": float(delta.quantile(0.16)),
+                "p84": float(delta.quantile(0.84)),
+            }
+        )
+    summary = pd.DataFrame(summary_rows)
+    y_positions = np.arange(len(summary))[::-1]
+    for y_position, row in zip(y_positions, summary.itertuples(index=False), strict=True):
+        axes[1].plot(
+            [row.p16, row.p84],
+            [y_position, y_position],
+            color=colors[row.model_name],
+            linewidth=2.2,
+            solid_capstyle="round",
+        )
+        axes[1].scatter(
+            row.median,
+            y_position,
+            s=34,
+            color=colors[row.model_name],
+            edgecolors="black",
+            linewidths=0.4,
+            zorder=3,
+        )
+    axes[1].axvline(0.0, color="black", linewidth=1.0, linestyle="--")
+    axes[1].set_yticks(y_positions)
+    axes[1].set_yticklabels(summary["label"], fontsize=7)
+    axes[1].set_xlabel(r"$\Delta\log_{10}M_{\rm ini}$ relative to Baumgardt")
+    axes[1].set_xlim(-0.62, 0.18)
+    axes[1].set_ylim(-0.7, len(summary) - 0.3)
+
     fig.savefig(output_path, dpi=200 if output_path.suffix.lower() == ".png" else None)
     plt.close(fig)
 
