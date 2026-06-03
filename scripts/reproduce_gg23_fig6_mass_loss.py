@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-from dataclasses import replace
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -27,8 +26,8 @@ from globular_clusters_imf.model import AGE_GYR  # noqa: E402
 
 MDOT_REF_ABS_MSUN_PER_MYR = 30.0
 REFERENCE_EFFECTIVE_RADIUS_KPC = 1.0
-MASS_GRID_MIN = 1.0e2
 MASS_GRID_MAX = 1.0e7
+LOG_MASS_FUNCTION_OFFSET = 7.0
 PAPER_TABLE2 = {
     (2.0 / 3.0, 2.0 / 3.0): (0.55, 5.16, 4.99, 0.93),
     (2.0 / 3.0, 1.0): (0.70, 5.53, 5.48, 0.73),
@@ -140,23 +139,20 @@ def evolved_powerlaw_mass_function_moments(model: GG23DisruptionModel) -> dict[s
 
 def plot_fig6_style(table: pd.DataFrame, pdf_path: Path, png_path: Path) -> None:
     fig, axes = plt.subplots(1, 2, figsize=(9.0, 4.0), constrained_layout=True)
-    colors = {
-        (2.0 / 3.0, 2.0 / 3.0): "#1b9e77",
-        (2.0 / 3.0, 1.0): "#7570b3",
-        (2.0 / 3.0, 4.0 / 3.0): "#d95f02",
-        (1.0, 2.0 / 3.0): "#66a61e",
-        (1.0, 1.0): "#e7298a",
-        (1.0, 4.0 / 3.0): "#a6761d",
+    colors_by_y = {
+        2.0 / 3.0: "red",
+        1.0: "black",
+        4.0 / 3.0: "green",
     }
-
-    time_gyr = np.linspace(0.0, AGE_GYR, 500)
-    initial_masses = [2.0e5, 5.0e5, 1.0e6]
-    line_styles = {2.0e5: "-", 5.0e5: "--", 1.0e6: ":"}
-    left_models = [
-        (2.0 / 3.0, 2.0 / 3.0),
-        (2.0 / 3.0, 4.0 / 3.0),
-        (1.0, 1.0),
-    ]
+    line_styles_by_x = {
+        2.0 / 3.0: "-",
+        1.0: "--",
+    }
+    tau_m_ref_gyr = GG23_REFERENCE_MASS_MSUN / MDOT_REF_ABS_MSUN_PER_MYR / 1.0e3
+    time_over_tau = np.linspace(0.0, 1.0, 500)
+    time_gyr = time_over_tau * tau_m_ref_gyr
+    initial_masses = [0.5 * GG23_REFERENCE_MASS_MSUN, GG23_REFERENCE_MASS_MSUN, 1.5 * GG23_REFERENCE_MASS_MSUN]
+    left_models = [(x, y) for x in (2.0 / 3.0, 1.0) for y in (2.0 / 3.0, 1.0, 4.0 / 3.0)]
     for x, y in left_models:
         model = model_for_xy(x, y)
         for initial_mass in initial_masses:
@@ -173,21 +169,18 @@ def plot_fig6_style(table: pd.DataFrame, pdf_path: Path, png_path: Path) -> None
                 dtype=float,
             )
             axes[0].plot(
-                time_gyr,
-                present,
-                color=colors[(x, y)],
-                linestyle=line_styles[initial_mass],
-                linewidth=1.4,
-                label=fr"$x={x:.2f}, y={y:.2f}$" if initial_mass == initial_masses[0] else None,
+                time_over_tau,
+                present / GG23_REFERENCE_MASS_MSUN,
+                color=colors_by_y[y],
+                linestyle=line_styles_by_x[x],
+                linewidth=1.1,
             )
-    axes[0].set_yscale("log")
-    axes[0].set_xlim(0.0, AGE_GYR)
-    axes[0].set_ylim(8.0e2, 1.2e6)
-    axes[0].set_xlabel("time [Gyr]")
-    axes[0].set_ylabel(r"$M(t)\ [{\rm M}_\odot]$")
-    axes[0].legend(loc="lower left", fontsize=7, frameon=False)
+    axes[0].set_xlim(0.0, 1.0)
+    axes[0].set_ylim(0.0, 1.5)
+    axes[0].set_xlabel(r"$t/\tau_M(M_{\rm ref})$")
+    axes[0].set_ylabel(r"$M(t)/M_{\rm ref}$")
 
-    present_mass_grid = np.logspace(3.0, 7.4, 800)
+    present_mass_grid = np.logspace(2.0, 7.0, 800)
     right_models = [
         (2.0 / 3.0, 2.0 / 3.0),
         (2.0 / 3.0, 1.0),
@@ -216,20 +209,18 @@ def plot_fig6_style(table: pd.DataFrame, pdf_path: Path, png_path: Path) -> None
             + float(model.x) / float(model.y) * np.power(forward_present / initial_mass, -float(model.y))
         )
         dnd_logm = np.power(initial_mass, -1.0) / dlnm_dlnmi
-        dnd_logm /= np.nanmax(dnd_logm)
+        log_mass_function = np.log10(dnd_logm) + LOG_MASS_FUNCTION_OFFSET
         axes[1].plot(
-            present_mass_grid,
-            dnd_logm,
-            color=colors[(x, y)],
-            linewidth=1.5,
-            label=fr"$x={x:.2f}, y={y:.2f}$",
+            np.log10(present_mass_grid),
+            log_mass_function,
+            color=colors_by_y[y],
+            linestyle=line_styles_by_x[x],
+            linewidth=1.1,
         )
-    axes[1].set_xscale("log")
-    axes[1].set_xlim(1.0e3, 2.5e7)
-    axes[1].set_ylim(0.0, 1.08)
-    axes[1].set_xlabel(r"$M\ [{\rm M}_\odot]$")
-    axes[1].set_ylabel(r"normalized $dN/d\log M$")
-    axes[1].legend(loc="upper right", fontsize=7, frameon=False)
+    axes[1].set_xlim(2.0, 7.0)
+    axes[1].set_ylim(-1.3, 1.9)
+    axes[1].set_xlabel(r"$\log_{10} M\ [{\rm M}_\odot]$")
+    axes[1].set_ylabel(r"$\log_{10}\psi(\log_{10} M)+C$")
 
     fig.suptitle("GG23 Fig. 6-style mass-loss check", fontsize=11)
     fig.savefig(pdf_path)
