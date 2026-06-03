@@ -111,10 +111,11 @@ def gg23_radius_dependent_mass_loss_parameters(
     y = np.full_like(radius, float(model.y), dtype=float)
 
     if model.metallicity_gradient:
-        radius_for_gradient = np.clip(radius, 1.0, 10.0)
-        log_radius = np.log10(radius_for_gradient)
-        mdot_ref = -30.0 * (1.0 + 0.5 * log_radius)
-        y = (2.0 / 3.0) + (2.0 / 3.0) * log_radius
+        radius_for_gradient = np.clip(radius, 1.0e-12, None)
+        mask = radius_for_gradient < 10.0
+        log_radius = np.log10(radius_for_gradient[mask])
+        mdot_ref[mask] *= (2.0 / 3.0) + (1.0 / 3.0) * log_radius
+        y[mask] = (2.0 / 3.0) + (2.0 / 3.0) * log_radius
 
     return mdot_ref, y
 
