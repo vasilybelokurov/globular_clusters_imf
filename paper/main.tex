@@ -433,6 +433,27 @@ The important point is that Figure~\ref{fig:gg23_survivability_model_mini} chang
     \label{fig:gg23_survivability_model_mini}
 \end{figure*}
 
+We then repeat the exact single-component Schechter inference in each GG23 coordinate system, using the same $\texttt{logpoly3}$ radial family and the same iterative detectability correction. Figure~\ref{fig:gg23_imf_comparison} compares the resulting IMFs with the Baumgardt-based baseline, and Table~\ref{tab:gg23_imf_comparison} lists the corresponding inferred parameters. The alternative disruption laws change the preferred lower-bound population at the factor-of-two level, but they do not drive the fit to a qualitatively different IMF family. All six solutions remain Schechter-like over the constrained mass range. The largest shifts come from the metallicity-gradient and past-tidal-evolution variants, which change both the recovered initial masses of the observed clusters and the survivability correction applied below the present-day catalogue.
+
+\begin{figure*}
+    \centering
+    \includegraphics[width=\textwidth]{figures/gg23_imf_comparison.pdf}
+    \caption{Inferred Schechter IMFs for the Baumgardt baseline and the five GG23 disruption calibrations. Left: differential IMF, $dN/d\log_{10}M_{\rm ini}$. Right: cumulative IMF, $N(>M_{\rm ini})$. Solid curves show posterior medians, and shaded bands show the central 68 per cent posterior ranges. Each model uses the same $\texttt{logpoly3}$ radial family and is normalized above $M_{\rm ini}=10^4\,{\rm M}_\odot$.}
+    \label{fig:gg23_imf_comparison}
+\end{figure*}
+
+\begin{table*}
+    \centering
+    \caption{Inferred Schechter parameters for the Baumgardt baseline and the five GG23 disruption calibrations. Quoted values are posterior medians with central 68 per cent ranges. The final two columns give the inferred number and stellar mass of clusters born above $M_{\rm ini}=10^4\,{\rm M}_\odot$.}
+    \label{tab:gg23_imf_comparison}
+    \begin{tabular}{lccccc}
+        \hline
+        Model & $\eta_t$ & $\alpha$ & $\log_{10}(M_c/{\rm M}_\odot)$ & $N_0(>10^4)$ & $M_{\star,0}(>10^4)\,[10^8{\rm M}_\odot]$ \\
+        \hline
+        \input{tables/gg23_imf_comparison.tex}
+    \end{tabular}
+\end{table*}
+
 \clearpage
 
 \section{Discussion}\label{sec:discussion}
