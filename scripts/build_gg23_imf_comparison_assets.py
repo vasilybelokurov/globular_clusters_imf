@@ -74,6 +74,8 @@ RUNS = [
     ),
 ]
 
+POSTERIOR_PREDICTIVE_SCORE_SPACE = "logMnow_loga_D_absb_absl"
+
 
 def schechter_dndlogm(log_mass: np.ndarray, alpha: float, log10_m_c_msun: float) -> np.ndarray:
     mass = np.power(10.0, log_mass)
@@ -265,6 +267,31 @@ def format_mass_1e8(q16: float, q50: float, q84: float) -> str:
     return format_symmetric_interval(q16 / 1.0e8, q50 / 1.0e8, q84 / 1.0e8, 2)
 
 
+def format_delta_log_predictive(value: float) -> str:
+    if not np.isfinite(value):
+        return "--"
+    return f"{value:.2f}"
+
+
+def load_posterior_predictive_deltas() -> dict[str, float]:
+    path = PROJECT_ROOT / "outputs" / "tables" / "observed_space_posterior_predictive_summary.csv"
+    if not path.exists():
+        raise FileNotFoundError(
+            f"{path} is required for the Table 2 predictive-score column. "
+            "Run scripts/compute_observed_space_posterior_predictive_scores.py first."
+        )
+    table = pd.read_csv(path)
+    subset = table.loc[table["score_space"].astype(str) == POSTERIOR_PREDICTIVE_SCORE_SPACE]
+    if subset.empty:
+        raise ValueError(
+            f"{path} does not contain score_space={POSTERIOR_PREDICTIVE_SCORE_SPACE!r}."
+        )
+    return {
+        str(row.model_label): float(row.delta_posterior_predictive_log_likelihood)
+        for row in subset.itertuples(index=False)
+    }
+
+
 def build_figure(curves: list[tuple[ImfRun, np.ndarray, np.ndarray, np.ndarray]], output_pdf: Path, output_png: Path) -> None:
     log_mass = np.linspace(4.0, 7.35, 550)
     fig, axes = plt.subplots(1, 2, figsize=(12.0, 5.0), constrained_layout=True)
@@ -320,6 +347,7 @@ def write_tables(rows: list[dict[str, object]], table_tex: Path, table_csv: Path
                     str(row["logmc_tex"]),
                     str(row["n0_tex"]),
                     str(row["m0_1e8_tex"]),
+                    str(row["delta_log_pp_tex"]),
                 ]
             )
             + r" \\"
@@ -331,6 +359,7 @@ def main() -> None:
     log_mass = np.linspace(4.0, 7.35, 550)
     curves = []
     rows: list[dict[str, object]] = []
+    delta_log_pp_by_model = load_posterior_predictive_deltas()
 
     for run in RUNS:
         samples = load_samples(run)
@@ -344,6 +373,7 @@ def main() -> None:
         logmc = summary["input_log10_m_c_msun"]
         n0 = summary["final_total_initial_count_above_log10_4"]
         m0 = summary["final_total_initial_stellar_mass_above_log10_4_msun"]
+        delta_log_pp = delta_log_pp_by_model[run.label]
         rows.append(
             {
                 "model": run.label,
@@ -364,11 +394,13 @@ def main() -> None:
                 "m0_q16": m0[0],
                 "m0_q50": m0[1],
                 "m0_q84": m0[2],
+                "delta_log_pp": delta_log_pp,
                 "eta_t_tex": format_symmetric_interval(*eta, precision=2),
                 "alpha_tex": format_symmetric_interval(*alpha, precision=2),
                 "logmc_tex": format_symmetric_interval(*logmc, precision=2),
                 "n0_tex": format_count(*n0),
                 "m0_1e8_tex": format_mass_1e8(*m0),
+                "delta_log_pp_tex": format_delta_log_predictive(delta_log_pp),
             }
         )
 

@@ -435,6 +435,17 @@ The important point is that Figure~\ref{fig:gg23_survivability_model_mini} chang
 
 We then repeat the exact single-component Schechter inference in each GG23 coordinate system, using the same $\texttt{logpoly3}$ radial family and the same iterative detectability correction. Figure~\ref{fig:gg23_imf_comparison} compares the resulting IMFs and intrinsic radial laws with the Baumgardt-based baseline, and Table~\ref{tab:gg23_imf_comparison} lists the corresponding inferred parameters. The alternative disruption laws change the preferred lower-bound population at the factor-of-two level, but they do not drive the fit to a qualitatively different IMF family. All six solutions remain Schechter-like over the constrained mass range. The largest shifts come from the metallicity-gradient and past-tidal-evolution variants, which change both the recovered initial masses of the observed clusters and the survivability correction applied below the present-day catalogue.
 
+To compare the six disruption calibrations in a common observed space, we also compute a posterior predictive count likelihood for the binned present-day catalogue. The data vector contains counts in bins of $(\log M_{\rm now},\log a,D_\odot,|b|,|l|)$. For each posterior draw, we reconstruct the draw-specific survivability $S(M_{\rm ini},a)$ and intrinsic effective detectability $Q(M_{\rm ini},a)$, fix the Schechter IMF to the sampled $(\alpha,\log_{10}M_c)$ values, and reprofile the three nuisance coefficients of the $\texttt{logpoly3}$ radial law. We then predict the complete-survivor distribution in observable space, refit the logistic completeness law $C(\log M_{\rm now},D_\odot,|b|,|l|)$ for that draw, and evaluate the Poisson likelihood of the observed binned counts,
+\begin{equation}
+P_{\rm pred}
+=
+\left\langle
+\prod_j
+\frac{\mu_j(\theta)^{n_j}\exp[-\mu_j(\theta)]}{n_j!}
+\right\rangle_{\theta},
+\end{equation}
+where $n_j$ is the observed count in bin $j$, $\mu_j(\theta)$ is the selected predicted count for posterior draw $\theta$, and the average is over posterior draws. The last column of Table~\ref{tab:gg23_imf_comparison} reports $\Delta\ln P_{\rm pred}$ relative to the best value among the six models. This is an observed-space posterior predictive diagnostic, not an independent held-out validation; it asks which fitted disruption calibration best reproduces the joint distribution of present-day mass, orbit size, sky position, and heliocentric distance after the same selection treatment is applied.
+
 \begin{figure*}
     \centering
     \includegraphics[width=\textwidth]{figures/gg23_imf_comparison.pdf}
@@ -444,11 +455,11 @@ We then repeat the exact single-component Schechter inference in each GG23 coord
 
 \begin{table*}
     \centering
-    \caption{Inferred Schechter parameters for the Baumgardt baseline and the five GG23 disruption calibrations. Quoted values are posterior medians with central 68 per cent ranges. The final two columns give the inferred number and stellar mass of clusters born above $M_{\rm ini}=10^4\,{\rm M}_\odot$.}
+    \caption{Inferred Schechter parameters for the Baumgardt baseline and the five GG23 disruption calibrations. Quoted values are posterior medians with central 68 per cent ranges. The $N_0$ and $M_{\star,0}$ columns give the inferred number and stellar mass of clusters born above $M_{\rm ini}=10^4\,{\rm M}_\odot$. The final column gives the posterior predictive log-likelihood difference in the binned observed space $(\log M_{\rm now},\log a,D_\odot,|b|,|l|)$, measured relative to the best of the six models.}
     \label{tab:gg23_imf_comparison}
-    \begin{tabular}{lccccc}
+    \begin{tabular}{lcccccc}
         \hline
-        Model & $\eta_t$ & $\alpha$ & $\log_{10}(M_c/{\rm M}_\odot)$ & $N_0(>10^4)$ & $M_{\star,0}(>10^4)\,[10^8{\rm M}_\odot]$ \\
+        Model & $\eta_t$ & $\alpha$ & $\log_{10}(M_c/{\rm M}_\odot)$ & $N_0(>10^4)$ & $M_{\star,0}(>10^4)\,[10^8{\rm M}_\odot]$ & $\Delta\ln P_{\rm pred}$ \\
         \hline
         \input{tables/gg23_imf_comparison.tex}
     \end{tabular}
