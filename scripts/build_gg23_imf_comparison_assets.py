@@ -404,6 +404,7 @@ def main() -> None:
             }
         )
 
+    rows = sorted(rows, key=lambda row: float(row["delta_log_pp"]), reverse=True)
     build_figure(
         curves,
         PROJECT_ROOT / "paper" / "figures" / "gg23_imf_comparison.pdf",
