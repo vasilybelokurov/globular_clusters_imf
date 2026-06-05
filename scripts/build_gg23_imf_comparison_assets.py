@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import pickle
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,13 +14,7 @@ os.environ.setdefault("XDG_CACHE_HOME", str(PROJECT_ROOT / ".cache"))
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from scipy import interpolate
-
-from globular_clusters_imf.joint_model import (
-    JointLikelihoodContext,
-    JointModelSpec,
-    fit_single_joint_model_with_fixed_imf_params,
-)
+from scipy import stats
 
 if not hasattr(np, "trapezoid"):
     np.trapezoid = np.trapz
@@ -132,115 +125,6 @@ def quantile_imf_curves(samples: pd.DataFrame, log_mass: np.ndarray) -> np.ndarr
     return np.quantile(np.asarray(differential_curves), [0.16, 0.5, 0.84], axis=0)
 
 
-def load_best_result(run: ImfRun) -> dict[str, object]:
-    path = PROJECT_ROOT / "variants" / run.variant / "outputs" / "tables" / "exact_parallel_mcmc_best_result.pkl"
-    if not path.exists():
-        raise FileNotFoundError(path)
-    with path.open("rb") as handle:
-        return pickle.load(handle)
-
-
-def context_with_surface_draws(
-    base_context: JointLikelihoodContext,
-    survival_probability: np.ndarray,
-    effective_detectability: np.ndarray,
-) -> JointLikelihoodContext:
-    survival_probability = np.clip(np.asarray(survival_probability, dtype=float), 1.0e-12, 1.0)
-    selection_probability = np.clip(
-        survival_probability * np.asarray(effective_detectability, dtype=float),
-        1.0e-12,
-        1.0,
-    )
-    survival_interpolator = interpolate.RegularGridInterpolator(
-        (base_context.log_mass_grid, base_context.log_a_grid),
-        survival_probability,
-        bounds_error=False,
-        fill_value=None,
-    )
-    selection_interpolator = interpolate.RegularGridInterpolator(
-        (base_context.log_mass_grid, base_context.log_a_grid),
-        selection_probability,
-        bounds_error=False,
-        fill_value=None,
-    )
-    return JointLikelihoodContext(
-        log_mass_data=base_context.log_mass_data.copy(),
-        log_a_data=base_context.log_a_data.copy(),
-        log_mass_grid=base_context.log_mass_grid.copy(),
-        log_a_grid=base_context.log_a_grid.copy(),
-        survival_probability_grid=survival_probability,
-        survival_interpolator=survival_interpolator,
-        selection_probability_grid=selection_probability,
-        selection_interpolator=selection_interpolator,
-        radial_step_edges=base_context.radial_step_edges.copy(),
-        log_a_mean=base_context.log_a_mean,
-        log_a_std=base_context.log_a_std,
-    )
-
-
-def load_surface_index_table(run: ImfRun) -> pd.DataFrame:
-    worker_dir = PROJECT_ROOT / "variants" / run.variant / "outputs" / "parallel_exact_mcmc_workers"
-    frames = []
-    for csv_path in sorted(worker_dir.glob("chain_*_selection_surfaces.csv")):
-        chain = int(csv_path.name.split("_")[1])
-        frame = pd.read_csv(csv_path).reset_index(names="surface_index")
-        frame["chain"] = chain
-        frame["surface_npz"] = str(worker_dir / f"chain_{chain}_selection_surfaces.npz")
-        frames.append(frame)
-    if not frames:
-        raise FileNotFoundError(f"No posterior surface files found under {worker_dir}")
-    return pd.concat(frames, ignore_index=True)
-
-
-def quantile_radial_curves(
-    run: ImfRun,
-    n_samples: int = 120,
-    seed: int = 20260604,
-) -> tuple[np.ndarray, np.ndarray]:
-    best_result = load_best_result(run)
-    base_context = best_result["final_context"]
-    radius_grid = np.power(10.0, np.asarray(base_context.log_a_grid, dtype=float))
-    spec = JointModelSpec(imf_family="schechter", radial_model="logpoly3")
-    best_radial_start = np.asarray(best_result["final_payload"]["radial_parameters_raw"], dtype=float)
-
-    surface_table = load_surface_index_table(run)
-    ok = surface_table.loc[surface_table["status"].astype(str) == "ok"].reset_index(drop=True)
-    if ok.empty:
-        raise ValueError(f"No successful posterior surface rows for {run.variant}")
-    selected = ok.sample(n=min(n_samples, len(ok)), random_state=seed).reset_index(drop=True)
-
-    npz_cache: dict[str, np.lib.npyio.NpzFile] = {}
-    radial_curves = []
-    current_start = best_radial_start
-    for row in selected.itertuples(index=False):
-        npz_path = str(row.surface_npz)
-        if npz_path not in npz_cache:
-            npz_cache[npz_path] = np.load(npz_path)
-        surfaces = npz_cache[npz_path]
-        surface_index = int(row.surface_index)
-        context = context_with_surface_draws(
-            base_context,
-            surfaces["survival_probability"][surface_index],
-            surfaces["effective_detectability"][surface_index],
-        )
-        payload = fit_single_joint_model_with_fixed_imf_params(
-            context,
-            spec=spec,
-            fixed_imf_params=np.array(
-                [float(row.input_alpha_dndm), float(row.input_log10_m_c_msun)],
-                dtype=float,
-            ),
-            start_radial_params=current_start,
-        )
-        current_start = np.asarray(payload["radial_parameters_raw"], dtype=float)
-        radial_density = np.asarray(payload["model"]["radial_density_grid"], dtype=float)
-        radial_curves.append(float(row.final_total_initial_count_above_log10_4) * radial_density)
-
-    for item in npz_cache.values():
-        item.close()
-    return radius_grid, np.quantile(np.asarray(radial_curves), [0.16, 0.5, 0.84], axis=0)
-
-
 def summary_from_samples(samples: pd.DataFrame) -> dict[str, tuple[float, float, float]]:
     return {
         column: tuple(float(value) for value in samples[column].quantile([0.16, 0.5, 0.84]))
@@ -292,19 +176,103 @@ def load_posterior_predictive_deltas() -> dict[str, float]:
     }
 
 
-def build_figure(curves: list[tuple[ImfRun, np.ndarray, np.ndarray, np.ndarray]], output_pdf: Path, output_png: Path) -> None:
-    log_mass = np.linspace(4.0, 7.35, 550)
-    fig, axes = plt.subplots(1, 2, figsize=(12.0, 5.0), constrained_layout=True)
+def padded_limits(values: np.ndarray, quantiles: tuple[float, float] = (0.005, 0.995), pad_fraction: float = 0.08) -> tuple[float, float]:
+    finite = np.asarray(values, dtype=float)
+    finite = finite[np.isfinite(finite)]
+    low, high = np.quantile(finite, quantiles)
+    width = max(float(high - low), 1.0e-6)
+    return float(low - pad_fraction * width), float(high + pad_fraction * width)
 
-    for run, differential_quantiles, radius_grid, radial_quantiles in curves:
+
+def hpd_contour_grid(
+    x: np.ndarray,
+    y: np.ndarray,
+    x_limits: tuple[float, float],
+    y_limits: tuple[float, float],
+    n_grid: int = 90,
+    probabilities: tuple[float, float] = (0.95, 0.68),
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[float]]:
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    finite = np.isfinite(x) & np.isfinite(y)
+    x = x[finite]
+    y = y[finite]
+    kde = stats.gaussian_kde(np.vstack([x, y]))
+    x_grid = np.linspace(x_limits[0], x_limits[1], n_grid)
+    y_grid = np.linspace(y_limits[0], y_limits[1], n_grid)
+    xx, yy = np.meshgrid(x_grid, y_grid)
+    density = kde(np.vstack([xx.ravel(), yy.ravel()])).reshape(xx.shape)
+    sorted_density = np.sort(density.ravel())[::-1]
+    cumulative = np.cumsum(sorted_density)
+    cumulative /= cumulative[-1]
+    levels = []
+    for probability in probabilities:
+        index = int(np.searchsorted(cumulative, probability, side="left"))
+        index = min(index, len(sorted_density) - 1)
+        levels.append(float(sorted_density[index]))
+    return xx, yy, density, levels
+
+
+def draw_hpd_contours(
+    axis,
+    x: np.ndarray,
+    y: np.ndarray,
+    x_limits: tuple[float, float],
+    y_limits: tuple[float, float],
+    color: str,
+) -> None:
+    xx, yy, density, levels = hpd_contour_grid(x, y, x_limits, y_limits)
+    for level, linewidth, alpha in zip(levels, [0.9, 1.8], [0.45, 0.95], strict=True):
+        if float(np.nanmin(density)) < level < float(np.nanmax(density)):
+            axis.contour(xx, yy, density, levels=[level], colors=[color], linewidths=linewidth, alpha=alpha)
+    axis.scatter(
+        np.median(x),
+        np.median(y),
+        s=18,
+        color=color,
+        edgecolor="white",
+        linewidth=0.45,
+        zorder=4,
+    )
+
+
+def build_figure(curves: list[tuple[ImfRun, np.ndarray, pd.DataFrame]], output_pdf: Path, output_png: Path) -> None:
+    log_mass = np.linspace(4.0, 7.35, 550)
+    fig, axes = plt.subplots(1, 3, figsize=(15.5, 4.8), constrained_layout=True)
+
+    all_alpha = np.concatenate([samples["input_alpha_dndm"].to_numpy(dtype=float) for _, _, samples in curves])
+    all_logmc = np.concatenate([samples["input_log10_m_c_msun"].to_numpy(dtype=float) for _, _, samples in curves])
+    all_n0 = np.concatenate([samples["final_total_initial_count_above_log10_4"].to_numpy(dtype=float) for _, _, samples in curves])
+    all_mstar_1e8 = np.concatenate(
+        [samples["final_total_initial_stellar_mass_above_log10_4_msun"].to_numpy(dtype=float) / 1.0e8 for _, _, samples in curves]
+    )
+    alpha_limits = padded_limits(all_alpha)
+    logmc_limits = padded_limits(all_logmc)
+    n0_limits = padded_limits(all_n0)
+    mstar_limits = padded_limits(all_mstar_1e8)
+
+    for run, differential_quantiles, samples in curves:
         diff_q16, diff_q50, diff_q84 = differential_quantiles
-        radial_q16, radial_q50, radial_q84 = radial_quantiles
 
         axes[0].fill_between(log_mass, diff_q16, diff_q84, color=run.color, alpha=0.13, linewidth=0.0)
         axes[0].plot(log_mass, diff_q50, color=run.color, lw=2.0, label=run.label)
 
-        axes[1].fill_between(radius_grid, radial_q16, radial_q84, color=run.color, alpha=0.13, linewidth=0.0)
-        axes[1].plot(radius_grid, radial_q50, color=run.color, lw=2.0, label=run.label)
+        draw_hpd_contours(
+            axes[1],
+            samples["input_alpha_dndm"].to_numpy(dtype=float),
+            samples["input_log10_m_c_msun"].to_numpy(dtype=float),
+            alpha_limits,
+            logmc_limits,
+            run.color,
+        )
+        draw_hpd_contours(
+            axes[2],
+            samples["final_total_initial_count_above_log10_4"].to_numpy(dtype=float),
+            samples["final_total_initial_stellar_mass_above_log10_4_msun"].to_numpy(dtype=float) / 1.0e8,
+            n0_limits,
+            mstar_limits,
+            run.color,
+        )
 
     axes[0].set_title("Differential IMF")
     axes[0].set_ylabel(r"$dN/d\log_{10}M_{\rm ini}$")
@@ -313,13 +281,17 @@ def build_figure(curves: list[tuple[ImfRun, np.ndarray, np.ndarray, np.ndarray]]
     axes[0].set_yscale("log")
     axes[0].set_xlabel(r"$\log_{10}(M_{\rm ini}/{\rm M}_\odot)$")
 
-    axes[1].set_title("Intrinsic radial law")
-    axes[1].set_ylabel(r"$dN_0(>10^4{\rm M}_\odot)/d\log_{10}a$")
-    axes[1].set_xscale("log")
-    axes[1].set_yscale("log")
-    axes[1].set_xlim(0.45, 300.0)
-    axes[1].set_ylim(2.0e1, 7.0e3)
-    axes[1].set_xlabel(r"$a\ [{\rm kpc}]$")
+    axes[1].set_title("Schechter parameters")
+    axes[1].set_xlim(*alpha_limits)
+    axes[1].set_ylim(*logmc_limits)
+    axes[1].set_xlabel(r"$\alpha$")
+    axes[1].set_ylabel(r"$\log_{10}(M_c/{\rm M}_\odot)$")
+
+    axes[2].set_title("Birth population")
+    axes[2].set_xlim(*n0_limits)
+    axes[2].set_ylim(*mstar_limits)
+    axes[2].set_xlabel(r"$N_0(>10^4{\rm M}_\odot)$")
+    axes[2].set_ylabel(r"$M_{\star,0}(>10^4{\rm M}_\odot)\ [10^8{\rm M}_\odot]$")
 
     for axis in axes:
         axis.grid(alpha=0.15, linewidth=0.6)
@@ -364,8 +336,7 @@ def main() -> None:
     for run in RUNS:
         samples = load_samples(run)
         differential_quantiles = quantile_imf_curves(samples, log_mass)
-        radius_grid, radial_quantiles = quantile_radial_curves(run)
-        curves.append((run, differential_quantiles, radius_grid, radial_quantiles))
+        curves.append((run, differential_quantiles, samples))
 
         summary = summary_from_samples(samples)
         eta = summary["eta_t"]
