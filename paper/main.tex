@@ -318,65 +318,6 @@ The radial model comparison is shown in Figure~\ref{fig:single_component_radial_
 
 \clearpage
 
-\section{Two-component model with Belokurov--Kravtsov labels}\label{sec:two_component}
-We next fit a labelled two-component extension using the in-situ/accreted assignments of \citet{BelokurovKravtsov2024}. The labels are treated as fixed data, not inferred mixture memberships. Thus the model asks whether the same IMF, filtered through two different radial birth profiles, gives a better description of the labelled catalogue.
-
-Let $g\in\{\mathrm{in},\mathrm{acc}\}$ denote the Belokurov--Kravtsov label. The two component intensities are
-\begin{equation}
-\lambda_g(x)
-=
-N_{0,g}\,\phi(\log M_{\rm ini}\mid \alpha,M_c)\,
-A_g(\log a)\,S(x\mid\eta_t)\,Q(x),
-\end{equation}
-where the Schechter IMF parameters $(\alpha,\log_{10}M_c)$ and survivability parameter $\eta_t$ are shared, while each component has its own normalized smooth $\texttt{logpoly3}$ radial profile $A_g$ and normalization $N_{0,g}$. The detectability term $Q$ is the same intrinsic-space approximation defined in Section~\ref{sec:detectability}; the completeness law is fitted to the pooled observed catalogue and then applied to both labelled components. The labelled point-process likelihood is
-\begin{equation}
-\ln \mathcal{L}_{2}
-=
-\sum_g
-\left[
-\sum_{i\in g}\ln\lambda_g(x_i)
--
-\int_\Omega \lambda_g(x)\,{\rm d}x
--
-\ln N_g!
-\right],
-\end{equation}
-with $N_{\rm in}=\TwoCompNInSitu$, $N_{\rm acc}=\TwoCompNAccreted$, and $N=\TwoCompNTotal$.
-
-The factorial term matters for comparing the labelled two-component model to the unlabelled single-component model. The single-component likelihood contains $-\ln N!$, whereas the fixed labelled likelihood contains $-\ln N_{\rm in}!-\ln N_{\rm acc}!$. If the parameter-independent constants have been dropped during optimization, the labelled two-component likelihood must therefore be shifted onto the single-catalogue scale by
-\begin{equation}
-C_{\rm part}
-=
-\ln\frac{N!}{N_{\rm in}!\,N_{\rm acc}!}
-=\TwoCompPartitionConstant .
-\end{equation}
-Equivalently,
-\begin{align}
-\ln\mathcal{L}_{2,\mathrm{cond}}
-&=
-\ln\mathcal{L}_{2,\mathrm{raw}}+C_{\rm part},\\
-\mathrm{BIC}_{2,\mathrm{cond}}
-&=
-\mathrm{BIC}_{2,\mathrm{raw}}-2C_{\rm part}.
-\end{align}
-This correction does not affect the posterior within the two-component model, but it is required for any one- versus two-component $\Delta\mathrm{BIC}$. With the convention $\Delta\mathrm{BIC}=\mathrm{BIC}_{2}-\mathrm{BIC}_{1}$, the raw comparison gives $\Delta\mathrm{BIC}_{\rm raw}=\TwoCompRawDeltaBIC$, while the fixed-label correction gives $\Delta\mathrm{BIC}_{\rm cond}=\TwoCompConditionalDeltaBIC$. The corrected number should be interpreted as support for the imposed Belokurov--Kravtsov radial split, not as a blind discovery of two populations.
-
-Table~\ref{tab:two_component_check} summarizes the exact profiled MCMC result. The shared outer-parameter posterior is almost unchanged relative to the single-component fit. The two-component run gives $\eta_t=\TwoCompEtaMed_{-\TwoCompEtaMinus}^{+\TwoCompEtaPlus}$, $\alpha=\TwoCompAlphaMed_{-\TwoCompAlphaMinus}^{+\TwoCompAlphaPlus}$, and $\log_{10}(M_c/{\rm M}_\odot)=\TwoCompMcMed_{-\TwoCompMcMinus}^{+\TwoCompMcPlus}$, consistent with the single-component posterior. The total inferred population above $10^4\,{\rm M}_\odot$ is also similar, $N_0=\TwoCompNzeroMed_{-\TwoCompNzeroMinus}^{+\TwoCompNzeroPlus}$.
-
-The useful new information is the decomposition of this lower bound. The accreted-labelled clusters contribute $N_{0,\rm acc}=\TwoCompAccretedNzeroMed_{-\TwoCompAccretedNzeroMinus}^{+\TwoCompAccretedNzeroPlus}$ above $10^4\,{\rm M}_\odot$, corresponding to an accreted fraction $f_{\rm acc}=\TwoCompAccretedFractionMed_{-\TwoCompAccretedFractionMinus}^{+\TwoCompAccretedFractionPlus}$. Most of the broad high-normalization tail therefore remains attached to the in-situ-labelled component, not to the accreted-labelled one. Since the labels are imposed rather than inferred, this result is best read as a labelled decomposition of the single-component solution: allowing the Belokurov--Kravtsov components to have separate radial profiles does not move the inferred Schechter IMF appreciably.
-
-\begin{table*}
-    \centering
-    \caption{Exact profiled MCMC comparison between the adopted single-component model and the labelled Belokurov--Kravtsov two-component diagnostic. Quoted intervals are the central 68 per cent posterior ranges. The two-component model has a shared Schechter IMF and separate $\texttt{logpoly3}$ radial profiles for the fixed in-situ and accreted labels.}
-    \label{tab:two_component_check}
-    \begin{tabular}{lcccc}
-        \hline
-        \input{tables/two_component_results.tex}
-    \end{tabular}
-\end{table*}
-
-\clearpage
-
 \section{Initial masses under the Gieles--Gnedin disruption law}\label{sec:gg23_masses}
 The preceding inference uses the Baumgardt initial masses and the Baumgardt-based survivability surface as the baseline coordinate system. It is useful to ask how much of the result depends on that particular disruption calibration. As a first controlled comparison, we recompute the cluster initial masses and survivability boundaries using the analytic mass-loss law of \citet{GielesGnedin2023}, hereafter GG23.
 
@@ -498,6 +439,65 @@ where $n_j$ is the observed count in bin $j$, $\mu_j(\theta)$ is the selected pr
         Model & $\eta_t$ & $\alpha$ & $\log_{10}(M_c/{\rm M}_\odot)$ & $N_0(>10^4)$ & $M_{\star,0}(>10^4)\,[10^8{\rm M}_\odot]$ & $\Delta\ln P_{\rm pred}$ \\
         \hline
         \input{tables/gg23_imf_comparison.tex}
+    \end{tabular}
+\end{table*}
+
+\clearpage
+
+\section{Two-component model with Belokurov--Kravtsov labels}\label{sec:two_component}
+Having established the single-component result and its sensitivity to the disruption calibration, we next fit a labelled two-component extension using the in-situ/accreted assignments of \citet{BelokurovKravtsov2024}. The labels are treated as fixed data, not inferred mixture memberships. Thus the model asks whether the same IMF, filtered through two different radial birth profiles, gives a better description of the labelled catalogue.
+
+Let $g\in\{\mathrm{in},\mathrm{acc}\}$ denote the Belokurov--Kravtsov label. The two component intensities are
+\begin{equation}
+\lambda_g(x)
+=
+N_{0,g}\,\phi(\log M_{\rm ini}\mid \alpha,M_c)\,
+A_g(\log a)\,S(x\mid\eta_t)\,Q(x),
+\end{equation}
+where the Schechter IMF parameters $(\alpha,\log_{10}M_c)$ and survivability parameter $\eta_t$ are shared, while each component has its own normalized smooth $\texttt{logpoly3}$ radial profile $A_g$ and normalization $N_{0,g}$. The detectability term $Q$ is the same intrinsic-space approximation defined in Section~\ref{sec:detectability}; the completeness law is fitted to the pooled observed catalogue and then applied to both labelled components. The labelled point-process likelihood is
+\begin{equation}
+\ln \mathcal{L}_{2}
+=
+\sum_g
+\left[
+\sum_{i\in g}\ln\lambda_g(x_i)
+-
+\int_\Omega \lambda_g(x)\,{\rm d}x
+-
+\ln N_g!
+\right],
+\end{equation}
+with $N_{\rm in}=\TwoCompNInSitu$, $N_{\rm acc}=\TwoCompNAccreted$, and $N=\TwoCompNTotal$.
+
+The factorial term matters for comparing the labelled two-component model to the unlabelled single-component model. The single-component likelihood contains $-\ln N!$, whereas the fixed labelled likelihood contains $-\ln N_{\rm in}!-\ln N_{\rm acc}!$. If the parameter-independent constants have been dropped during optimization, the labelled two-component likelihood must therefore be shifted onto the single-catalogue scale by
+\begin{equation}
+C_{\rm part}
+=
+\ln\frac{N!}{N_{\rm in}!\,N_{\rm acc}!}
+=\TwoCompPartitionConstant .
+\end{equation}
+Equivalently,
+\begin{align}
+\ln\mathcal{L}_{2,\mathrm{cond}}
+&=
+\ln\mathcal{L}_{2,\mathrm{raw}}+C_{\rm part},\\
+\mathrm{BIC}_{2,\mathrm{cond}}
+&=
+\mathrm{BIC}_{2,\mathrm{raw}}-2C_{\rm part}.
+\end{align}
+This correction does not affect the posterior within the two-component model, but it is required for any one- versus two-component $\Delta\mathrm{BIC}$. With the convention $\Delta\mathrm{BIC}=\mathrm{BIC}_{2}-\mathrm{BIC}_{1}$, the raw comparison gives $\Delta\mathrm{BIC}_{\rm raw}=\TwoCompRawDeltaBIC$, while the fixed-label correction gives $\Delta\mathrm{BIC}_{\rm cond}=\TwoCompConditionalDeltaBIC$. The corrected number should be interpreted as support for the imposed Belokurov--Kravtsov radial split, not as a blind discovery of two populations.
+
+Table~\ref{tab:two_component_check} summarizes the exact profiled MCMC result. The shared outer-parameter posterior is almost unchanged relative to the single-component fit. The two-component run gives $\eta_t=\TwoCompEtaMed_{-\TwoCompEtaMinus}^{+\TwoCompEtaPlus}$, $\alpha=\TwoCompAlphaMed_{-\TwoCompAlphaMinus}^{+\TwoCompAlphaPlus}$, and $\log_{10}(M_c/{\rm M}_\odot)=\TwoCompMcMed_{-\TwoCompMcMinus}^{+\TwoCompMcPlus}$, consistent with the single-component posterior. The total inferred population above $10^4\,{\rm M}_\odot$ is also similar, $N_0=\TwoCompNzeroMed_{-\TwoCompNzeroMinus}^{+\TwoCompNzeroPlus}$.
+
+The useful new information is the decomposition of this lower bound. The accreted-labelled clusters contribute $N_{0,\rm acc}=\TwoCompAccretedNzeroMed_{-\TwoCompAccretedNzeroMinus}^{+\TwoCompAccretedNzeroPlus}$ above $10^4\,{\rm M}_\odot$, corresponding to an accreted fraction $f_{\rm acc}=\TwoCompAccretedFractionMed_{-\TwoCompAccretedFractionMinus}^{+\TwoCompAccretedFractionPlus}$. Most of the broad high-normalization tail therefore remains attached to the in-situ-labelled component, not to the accreted-labelled one. Since the labels are imposed rather than inferred, this result is best read as a labelled decomposition of the single-component solution: allowing the Belokurov--Kravtsov components to have separate radial profiles does not move the inferred Schechter IMF appreciably.
+
+\begin{table*}
+    \centering
+    \caption{Exact profiled MCMC comparison between the adopted single-component model and the labelled Belokurov--Kravtsov two-component diagnostic. Quoted intervals are the central 68 per cent posterior ranges. The two-component model has a shared Schechter IMF and separate $\texttt{logpoly3}$ radial profiles for the fixed in-situ and accreted labels.}
+    \label{tab:two_component_check}
+    \begin{tabular}{lcccc}
+        \hline
+        \input{tables/two_component_results.tex}
     \end{tabular}
 \end{table*}
 
