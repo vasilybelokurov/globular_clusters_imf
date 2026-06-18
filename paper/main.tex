@@ -501,6 +501,23 @@ The useful new information is the decomposition of this lower bound. The accrete
     \end{tabular}
 \end{table*}
 
+We repeat the same labelled decomposition for the five GG23 disruption calibrations in Table~\ref{tab:gg23_bk_two_component}. A full exact profiled MCMC run for each GG23 two-component model would require refitting two radial profiles and the detectability law at every proposed point in a model-specific GG23 mass coordinate. Instead, for each GG23 calibration we use 60 posterior draws from the corresponding single-component run in Section~\ref{sec:gg23_masses}. At each draw we recompute the GG23 initial masses and survivability surface, re-optimize the two labelled radial profiles and the detectability correction, and then importance-weight the draw by the labelled two-component likelihood relative to the single-component proposal. The last column gives the resulting effective sample size, so rows with concentrated importance weights can be identified directly.
+
+The conclusion is stable across disruption calibrations. The accreted-labelled component remains a minority of the inferred birth population, with $f_{\rm acc}\simeq 0.08$--0.16. The absolute accreted count changes because the total lower-bound population changes under the GG23 mass-loss prescriptions, but most of the inferred disrupted population remains associated with the in-situ-labelled radial component. The GG23 BHs + [Fe/H] row has the lowest effective sample size and should be treated as less numerically stable than the other rows; it nevertheless gives the same qualitative result.
+
+\begin{table*}
+    \centering
+    \caption{Labelled Belokurov--Kravtsov two-component diagnostic repeated for the GG23 disruption calibrations. The single-component column gives the posterior median from the corresponding GG23 single-component run. The two-component columns are obtained by re-profiling the labelled two-component radial profiles and detectability correction at 60 posterior draws from that single-component run, with importance weights from the labelled likelihood. The final column gives the effective sample size of the importance weights.}
+    \label{tab:gg23_bk_two_component}
+    \scriptsize
+    \begin{tabular}{lccccccc}
+        \hline
+        Model & Single $N_0$ & Two-comp. $N_0$ & In situ $N_0$ & Accreted $N_0$ & $f_{\rm acc}$ & $\Delta\mathrm{BIC}_{\rm cond}$ & $N_{\rm eff}$ \\
+        \hline
+        \input{tables/gg23_bk_two_component_summary.tex}
+    \end{tabular}
+\end{table*}
+
 \clearpage
 
 \section{Discussion}\label{sec:discussion}

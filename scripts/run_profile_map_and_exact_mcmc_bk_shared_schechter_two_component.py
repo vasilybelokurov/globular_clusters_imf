@@ -35,6 +35,7 @@ from run_profile_map_and_exact_mcmc_schechter_powerlaw_a import (
     _best_entry_on_edge,
     _build_anchor_library,
     _build_refined_spec_from_coarse_region,
+    _catalog_and_survival_grid_for_theta,
     _compute_rhat,
     _corner_plot,
     _entry_stage_copy,
@@ -655,6 +656,11 @@ def _failure_row(theta: np.ndarray, stage: str, message: str, spec) -> dict[str,
         "count_ratio_vs_baseline_above_log10_4": np.nan,
         "mass_ratio_vs_baseline_above_log10_4": np.nan,
         "surface_model": SURFACE_MODEL,
+        "survivability_backend": "baumgardt",
+        "gg23_model_name": "",
+        "gg23_model_label": "",
+        "gg23_mini_eta_t_dependent": False,
+        "max_abs_present_mass_residual_fraction": np.nan,
         "stage": stage,
         "status": "failed",
         "failure_message": message,
@@ -670,18 +676,19 @@ def _evaluate_theta_single_start(
     project_root: Path,
     n_detectability_iterations: int,
     relaxation: float,
+    survivability_backend: str,
+    gg23_model_name: str | None,
 ) -> dict[str, object]:
-    from globular_clusters_imf.smooth_survivability import build_smooth_survivability_grid
-
     eta_t, alpha, log_mc = [float(value) for value in theta]
-    smooth_survival = build_smooth_survivability_grid(
-        prepared_catalog,
+    working_catalog, smooth_survival, metadata = _catalog_and_survival_grid_for_theta(
+        prepared_catalog=prepared_catalog,
         eta_t=eta_t,
-        surface_model=SURFACE_MODEL,
+        survivability_backend=survivability_backend,
+        gg23_model_name=gg23_model_name,
     )
     survival_override = _survival_grid_override_from_smooth_survival(smooth_survival)
     env = _prepare_two_component_environment_with_smooth_survival(
-        prepared_catalog=prepared_catalog,
+        prepared_catalog=working_catalog,
         survival_grid_override=survival_override,
     )
     result = _fit_shared_schechter_two_component_detectability_em_fixed_imf_with_abs_longitude(
@@ -705,6 +712,7 @@ def _evaluate_theta_single_start(
         result=result,
         log_mass_min=LOG_MASS_MIN,
     )
+    row.update(metadata)
     return {
         "theta": np.asarray(theta, dtype=float),
         "log_posterior": float(row["log_likelihood"]),
@@ -724,6 +732,8 @@ def _evaluate_theta_multistart(
     anchor_start_state: dict[str, object] | None,
     n_detectability_iterations: int,
     relaxation: float,
+    survivability_backend: str,
+    gg23_model_name: str | None,
 ) -> dict[str, object]:
     start_candidates = [None]
     if anchor_start_state is not None:
@@ -742,6 +752,8 @@ def _evaluate_theta_multistart(
                 project_root=project_root,
                 n_detectability_iterations=n_detectability_iterations,
                 relaxation=relaxation,
+                survivability_backend=survivability_backend,
+                gg23_model_name=gg23_model_name,
             )
         except Exception as exc:
             failure_messages.append(type(exc).__name__ + ": " + str(exc))
@@ -811,6 +823,8 @@ def _run_exact_mcmc_chain_worker(
     fixed_anchor_library: list[dict[str, object]],
     n_detectability_iterations: int,
     relaxation: float,
+    survivability_backend: str,
+    gg23_model_name: str | None,
 ) -> dict[str, object]:
     rng = np.random.default_rng(seed)
     proposal_scales = 0.08 * np.asarray(widths, dtype=float)
@@ -841,6 +855,8 @@ def _run_exact_mcmc_chain_worker(
                     anchor_start_state=anchor_state,
                     n_detectability_iterations=n_detectability_iterations,
                     relaxation=relaxation,
+                    survivability_backend=survivability_backend,
+                    gg23_model_name=gg23_model_name,
                 )
                 proposal_entry = _lightweight_entry(proposal_exact)
                 proposal_entry["row"]["stage"] = "mcmc"
@@ -946,6 +962,8 @@ def main() -> None:
     parser.add_argument("--mcmc-seed", type=int, default=20260529)
     parser.add_argument("--n-detectability-iterations", type=int, default=12)
     parser.add_argument("--detectability-relaxation", type=float, default=0.7)
+    parser.add_argument("--survivability-backend", choices=["baumgardt", "gg23"], default="baumgardt")
+    parser.add_argument("--gg23-model", default="")
     parser.add_argument("--chain-worker-config")
     parser.add_argument("--chain-worker-output")
     args = parser.parse_args()
@@ -1012,6 +1030,8 @@ def main() -> None:
                         anchor_start_state=None,
                         n_detectability_iterations=int(args.n_detectability_iterations),
                         relaxation=float(args.detectability_relaxation),
+                        survivability_backend=str(args.survivability_backend),
+                        gg23_model_name=str(args.gg23_model) or None,
                     )
                     evaluation_cache[key] = entry
                 coarse_entries.append(entry)
@@ -1090,6 +1110,8 @@ def main() -> None:
                             anchor_start_state=anchor_state,
                             n_detectability_iterations=int(args.n_detectability_iterations),
                             relaxation=float(args.detectability_relaxation),
+                            survivability_backend=str(args.survivability_backend),
+                            gg23_model_name=str(args.gg23_model) or None,
                         )
                         evaluation_cache[key] = entry
                     current_entries.append(entry)
@@ -1148,6 +1170,9 @@ def main() -> None:
                 "in_situ_radial_model": spec.in_situ_radial_model,
                 "accreted_radial_model": spec.accreted_radial_model,
             },
+            "survivability_backend": str(args.survivability_backend),
+            "gg23_model_name": str(args.gg23_model),
+            "gg23_mini_eta_t_dependent": bool(str(args.survivability_backend) == "gg23"),
             "n_detectability_iterations": int(args.n_detectability_iterations),
             "coarse_grid_spec": coarse_spec.__dict__,
             "coarse_best": json.loads(pd.Series(coarse_best_entry["row"]).to_json()),
@@ -1208,6 +1233,8 @@ def main() -> None:
             "fixed_anchor_library": [_lightweight_entry(entry) for entry in fixed_anchor_library],
             "n_detectability_iterations": int(args.n_detectability_iterations),
             "relaxation": float(args.detectability_relaxation),
+            "survivability_backend": str(args.survivability_backend),
+            "gg23_model_name": str(args.gg23_model) or None,
         }
         config_path = worker_dir / f"chain_{chain_id}_config.pkl"
         result_path = worker_dir / f"chain_{chain_id}_result.pkl"
@@ -1321,6 +1348,8 @@ def main() -> None:
         anchor_start_state=best_anchor,
         n_detectability_iterations=int(args.n_detectability_iterations),
         relaxation=float(args.detectability_relaxation),
+        survivability_backend=str(args.survivability_backend),
+        gg23_model_name=str(args.gg23_model) or None,
     )
     _save_best_payload(best_entry, tables_dir, prefix="exact_parallel_mcmc")
 
@@ -1334,6 +1363,9 @@ def main() -> None:
             "in_situ_radial_model": spec.in_situ_radial_model,
             "accreted_radial_model": spec.accreted_radial_model,
         },
+        "survivability_backend": str(args.survivability_backend),
+        "gg23_model_name": str(args.gg23_model),
+        "gg23_mini_eta_t_dependent": bool(str(args.survivability_backend) == "gg23"),
         "sampler": "exact_profiled_random_walk_metropolis_subprocess_parallel",
         "n_detectability_iterations": int(args.n_detectability_iterations),
         "n_chains": int(args.mcmc_chains),
