@@ -308,7 +308,7 @@ def main() -> None:
     parser.add_argument("--n-age-grid", type=int, default=180)
     parser.add_argument("--n-feh-grid", type=int, default=180)
     parser.add_argument("--kde-bandwidth-scale", type=float, default=0.90)
-    parser.add_argument("--split-contour-fractions", default="0.20,0.40,0.60")
+    parser.add_argument("--split-contour-fractions", default="0.10,0.20,0.40,0.60")
     parser.add_argument("--split-contour-fraction", type=float, default=None)
     parser.add_argument("--max-surface-samples", type=int, default=0)
     parser.add_argument("--seed", type=int, default=20260619)
