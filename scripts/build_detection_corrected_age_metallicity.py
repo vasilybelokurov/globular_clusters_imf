@@ -85,6 +85,20 @@ def _enclosed_fraction_level(density: np.ndarray, fraction: float) -> float:
     return float(sorted_values[min(index, sorted_values.size - 1)])
 
 
+def _parse_contour_fractions(value: str) -> tuple[float, ...]:
+    fractions = tuple(float(item.strip()) for item in str(value).split(",") if item.strip())
+    if not fractions:
+        raise ValueError("At least one contour fraction is required.")
+    for fraction in fractions:
+        if not 0.0 < fraction < 1.0:
+            raise ValueError("Contour fractions must be between 0 and 1.")
+    return tuple(sorted(set(fractions)))
+
+
+def _format_contour_fractions(fractions: tuple[float, ...]) -> str:
+    return "/".join(f"{100.0 * fraction:.0f}" for fraction in fractions)
+
+
 def _plot_age_metallicity(
     *,
     table: pd.DataFrame,
@@ -188,7 +202,7 @@ def _plot_age_metallicity_by_origin(
     output_png: Path,
     bandwidth_scale: float,
     metallicity_column: str,
-    contour_fraction: float,
+    contour_fractions: tuple[float, ...],
 ) -> dict[str, dict[str, np.ndarray]]:
     observed_weights = np.ones(len(table), dtype=float)
     corrected_weights = table["birth_weight_q50"].to_numpy(dtype=float)
@@ -224,16 +238,19 @@ def _plot_age_metallicity_by_origin(
             if origin_label not in densities:
                 continue
             density = densities[origin_label]
-            level = _enclosed_fraction_level(density, contour_fraction)
-            if np.isfinite(level):
+            for fraction in sorted(contour_fractions, reverse=True):
+                level = _enclosed_fraction_level(density, fraction)
+                if not np.isfinite(level):
+                    continue
+                relative_rank = (1.0 - fraction) / (1.0 - min(contour_fractions))
                 axis.contour(
                     feh_grid,
                     age_grid,
                     density,
                     levels=[level],
                     colors=color,
-                    linewidths=1.8,
-                    alpha=0.98,
+                    linewidths=1.05 + 0.85 * relative_rank,
+                    alpha=0.55 + 0.40 * relative_rank,
                 )
 
             subset = table.loc[table["origin_label"] == origin_label]
@@ -261,7 +278,7 @@ def _plot_age_metallicity_by_origin(
     axes[0].set_ylim(float(age_grid.min()), float(age_grid.max()))
     fig.suptitle(
         rf"Origin-split age--metallicity density, VandenBerg ages, "
-        rf"{100.0 * contour_fraction:.0f}\% enclosed KDE contours, "
+        rf"{_format_contour_fractions(contour_fractions)}% enclosed KDE contours, "
         rf"$w_{{\rm birth}}=1/[S Q]$, bandwidth scale $={bandwidth_scale:.2f}$",
         fontsize=10,
     )
@@ -291,11 +308,16 @@ def main() -> None:
     parser.add_argument("--n-age-grid", type=int, default=180)
     parser.add_argument("--n-feh-grid", type=int, default=180)
     parser.add_argument("--kde-bandwidth-scale", type=float, default=0.90)
-    parser.add_argument("--split-contour-fraction", type=float, default=0.50)
+    parser.add_argument("--split-contour-fractions", default="0.20,0.40,0.60")
+    parser.add_argument("--split-contour-fraction", type=float, default=None)
     parser.add_argument("--max-surface-samples", type=int, default=0)
     parser.add_argument("--seed", type=int, default=20260619)
     parser.add_argument("--selection-floor", type=float, default=1.0e-4)
     args = parser.parse_args()
+    if args.split_contour_fraction is None:
+        split_contour_fractions = _parse_contour_fractions(str(args.split_contour_fractions))
+    else:
+        split_contour_fractions = (float(args.split_contour_fraction),)
 
     catalog = pd.read_csv(args.catalog)
     ages = pd.read_csv(args.ages)
@@ -403,7 +425,7 @@ def main() -> None:
         output_png=args.split_output_png,
         bandwidth_scale=float(args.kde_bandwidth_scale),
         metallicity_column=str(args.metallicity_column),
-        contour_fraction=float(args.split_contour_fraction),
+        contour_fractions=split_contour_fractions,
     )
     split_grid = {
         "feh": xx.ravel(),
@@ -426,7 +448,7 @@ def main() -> None:
         "birth_corrected_total_q50": corrected_total,
         "birth_corrected_total_q84": float(np.nanquantile(np.sum(birth_weights, axis=1), 0.84)),
         "kde_bandwidth_scale": float(args.kde_bandwidth_scale),
-        "split_contour_fraction": float(args.split_contour_fraction),
+        "split_contour_fractions": list(split_contour_fractions),
         "outputs": {
             "cluster_weights": str(cluster_path),
             "kde_grid": str(grid_path),
