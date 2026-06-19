@@ -18,6 +18,7 @@ os.environ.setdefault("XDG_CACHE_HOME", str(PROJECT_ROOT / ".cache"))
 (PROJECT_ROOT / ".cache" / "fontconfig").mkdir(parents=True, exist_ok=True)
 
 import matplotlib.pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap
 import numpy as np
 import pandas as pd
 from scipy import stats
@@ -29,6 +30,8 @@ from build_detection_corrected_mdf import DEFAULT_VARIANT, _interpolate_selectio
 DEFAULT_OUTPUT_ROOT = PROJECT_ROOT / "outputs" / "tables"
 DEFAULT_FIGURE_PDF = PROJECT_ROOT / "paper" / "figures" / "detection_corrected_age_metallicity.pdf"
 DEFAULT_FIGURE_PNG = PROJECT_ROOT / "paper" / "figures" / "detection_corrected_age_metallicity.png"
+DEFAULT_SPLIT_FIGURE_PDF = PROJECT_ROOT / "paper" / "figures" / "detection_corrected_age_metallicity_by_origin.pdf"
+DEFAULT_SPLIT_FIGURE_PNG = PROJECT_ROOT / "paper" / "figures" / "detection_corrected_age_metallicity_by_origin.png"
 
 
 def _weighted_kde_2d(
@@ -66,6 +69,10 @@ def _contour_levels(densities: list[np.ndarray], n_levels: int = 9) -> np.ndarra
     high = float(np.nanquantile(finite, 0.995))
     low = max(float(np.nanquantile(finite, 0.20)), high * 0.04)
     return np.linspace(low, high, n_levels)
+
+
+def _single_color_cmap(name: str, color: str) -> LinearSegmentedColormap:
+    return LinearSegmentedColormap.from_list(name, ["#ffffff", color])
 
 
 def _plot_age_metallicity(
@@ -132,6 +139,122 @@ def _plot_age_metallicity(
     plt.close(fig)
 
 
+def _origin_densities(
+    *,
+    table: pd.DataFrame,
+    weights: np.ndarray,
+    feh_grid: np.ndarray,
+    age_grid: np.ndarray,
+    bandwidth_scale: float,
+    metallicity_column: str,
+) -> dict[str, np.ndarray]:
+    weights = np.asarray(weights, dtype=float)
+    total_weight = float(np.sum(weights))
+    densities: dict[str, np.ndarray] = {}
+    for origin_label, subset in table.groupby("origin_label", sort=False):
+        indices = subset.index.to_numpy()
+        density = _weighted_kde_2d(
+            subset[metallicity_column].to_numpy(dtype=float),
+            subset["age_gyr"].to_numpy(dtype=float),
+            weights[indices],
+            feh_grid,
+            age_grid,
+            bandwidth_scale=bandwidth_scale,
+        )
+        origin_weight = float(np.sum(weights[indices]))
+        if np.isfinite(total_weight) and total_weight > 0.0:
+            density = density * origin_weight / total_weight
+        densities[str(origin_label)] = density
+    return densities
+
+
+def _plot_age_metallicity_by_origin(
+    *,
+    table: pd.DataFrame,
+    age_grid: np.ndarray,
+    feh_grid: np.ndarray,
+    corrected_total: float,
+    output_pdf: Path,
+    output_png: Path,
+    bandwidth_scale: float,
+    metallicity_column: str,
+) -> dict[str, dict[str, np.ndarray]]:
+    observed_weights = np.ones(len(table), dtype=float)
+    corrected_weights = table["birth_weight_q50"].to_numpy(dtype=float)
+    observed_densities = _origin_densities(
+        table=table,
+        weights=observed_weights,
+        feh_grid=feh_grid,
+        age_grid=age_grid,
+        bandwidth_scale=bandwidth_scale,
+        metallicity_column=metallicity_column,
+    )
+    corrected_densities = _origin_densities(
+        table=table,
+        weights=corrected_weights,
+        feh_grid=feh_grid,
+        age_grid=age_grid,
+        bandwidth_scale=bandwidth_scale,
+        metallicity_column=metallicity_column,
+    )
+
+    ordered_origins = [
+        ("in_situ", "in situ", "#2f6fbb"),
+        ("accreted", "accreted", "#e68a2e"),
+    ]
+    all_densities = list(observed_densities.values()) + list(corrected_densities.values())
+    levels = _contour_levels(all_densities)
+    fig, axes = plt.subplots(1, 2, figsize=(12.2, 4.8), constrained_layout=True, sharex=True, sharey=True)
+    panels = [
+        (axes[0], observed_densities, "Observed survivors", observed_weights, float(len(table))),
+        (axes[1], corrected_densities, "Birth-corrected", corrected_weights, corrected_total),
+    ]
+
+    for axis, densities, title, point_weights, total in panels:
+        for origin_label, label, color in ordered_origins:
+            if origin_label not in densities:
+                continue
+            density = densities[origin_label]
+            cmap = _single_color_cmap(f"{origin_label}_{title}", color)
+            axis.contourf(feh_grid, age_grid, density, levels=levels, cmap=cmap, alpha=0.42, extend="max")
+            axis.contour(feh_grid, age_grid, density, levels=levels[2::2], colors=color, linewidths=0.95, alpha=0.95)
+
+            subset = table.loc[table["origin_label"] == origin_label]
+            indices = subset.index.to_numpy()
+            origin_total = float(np.sum(point_weights[indices]))
+            sizes = 24.0 if title == "Observed survivors" else 15.0 + 10.0 * np.sqrt(point_weights[indices])
+            axis.scatter(
+                subset[metallicity_column],
+                subset["age_gyr"],
+                s=sizes,
+                color=color,
+                edgecolor="white",
+                linewidth=0.45,
+                alpha=0.90,
+                label=f"{label} ({origin_total:.0f})",
+                zorder=3,
+            )
+        axis.set_title(f"{title} ({total:.0f})")
+        axis.set_xlabel("[Fe/H]")
+        axis.grid(alpha=0.16, linewidth=0.7)
+        axis.legend(frameon=False, fontsize=8.5, loc="lower left")
+
+    axes[0].set_ylabel("Age [Gyr]")
+    axes[0].set_xlim(float(feh_grid.min()), float(feh_grid.max()))
+    axes[0].set_ylim(float(age_grid.min()), float(age_grid.max()))
+    fig.suptitle(
+        rf"Origin-split age--metallicity density, VandenBerg ages, "
+        rf"$w_{{\rm birth}}=1/[S Q]$, KDE bandwidth scale $={bandwidth_scale:.2f}$",
+        fontsize=10,
+    )
+    output_pdf.parent.mkdir(parents=True, exist_ok=True)
+    output_png.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_pdf)
+    fig.savefig(output_png, dpi=220)
+    plt.close(fig)
+    return {"observed": observed_densities, "birth_corrected": corrected_densities}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--variant", default=DEFAULT_VARIANT)
@@ -140,6 +263,8 @@ def main() -> None:
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     parser.add_argument("--output-pdf", type=Path, default=DEFAULT_FIGURE_PDF)
     parser.add_argument("--output-png", type=Path, default=DEFAULT_FIGURE_PNG)
+    parser.add_argument("--split-output-pdf", type=Path, default=DEFAULT_SPLIT_FIGURE_PDF)
+    parser.add_argument("--split-output-png", type=Path, default=DEFAULT_SPLIT_FIGURE_PNG)
     parser.add_argument("--metallicity-column", choices=["vandenberg_feh", "local_feh"], default="vandenberg_feh")
     parser.add_argument("--age-min", type=float, default=8.5)
     parser.add_argument("--age-max", type=float, default=13.5)
@@ -218,6 +343,7 @@ def main() -> None:
     args.output_root.mkdir(parents=True, exist_ok=True)
     cluster_path = args.output_root / "detection_corrected_age_metallicity_cluster_weights.csv"
     grid_path = args.output_root / "detection_corrected_age_metallicity_kde_grid.csv"
+    split_grid_path = args.output_root / "detection_corrected_age_metallicity_by_origin_kde_grid.csv"
     surface_meta_path = args.output_root / "detection_corrected_age_metallicity_surface_samples.csv"
     summary_path = args.output_root / "detection_corrected_age_metallicity_summary.json"
     cluster_columns = [
@@ -249,6 +375,24 @@ def main() -> None:
             "birth_corrected_density": corrected_density.ravel(),
         }
     ).to_csv(grid_path, index=False)
+    split_densities = _plot_age_metallicity_by_origin(
+        table=working,
+        age_grid=age_grid,
+        feh_grid=feh_grid,
+        corrected_total=corrected_total,
+        output_pdf=args.split_output_pdf,
+        output_png=args.split_output_png,
+        bandwidth_scale=float(args.kde_bandwidth_scale),
+        metallicity_column=str(args.metallicity_column),
+    )
+    split_grid = {
+        "feh": xx.ravel(),
+        "age_gyr": yy.ravel(),
+    }
+    for panel_name, panel_densities in split_densities.items():
+        for origin_label, density in panel_densities.items():
+            split_grid[f"{panel_name}_{origin_label}_density"] = density.ravel()
+    pd.DataFrame(split_grid).to_csv(split_grid_path, index=False)
 
     summary = {
         "variant": str(args.variant),
@@ -265,9 +409,12 @@ def main() -> None:
         "outputs": {
             "cluster_weights": str(cluster_path),
             "kde_grid": str(grid_path),
+            "split_kde_grid": str(split_grid_path),
             "surface_samples": str(surface_meta_path),
             "figure_pdf": str(args.output_pdf),
             "figure_png": str(args.output_png),
+            "split_figure_pdf": str(args.split_output_pdf),
+            "split_figure_png": str(args.split_output_png),
         },
     }
     summary_path.write_text(json.dumps(summary, indent=2))
