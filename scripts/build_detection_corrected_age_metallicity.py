@@ -18,7 +18,6 @@ os.environ.setdefault("XDG_CACHE_HOME", str(PROJECT_ROOT / ".cache"))
 (PROJECT_ROOT / ".cache" / "fontconfig").mkdir(parents=True, exist_ok=True)
 
 import matplotlib.pyplot as plt
-from matplotlib.colors import LinearSegmentedColormap
 import numpy as np
 import pandas as pd
 from scipy import stats
@@ -71,8 +70,19 @@ def _contour_levels(densities: list[np.ndarray], n_levels: int = 9) -> np.ndarra
     return np.linspace(low, high, n_levels)
 
 
-def _single_color_cmap(name: str, color: str) -> LinearSegmentedColormap:
-    return LinearSegmentedColormap.from_list(name, ["#ffffff", color])
+def _enclosed_fraction_level(density: np.ndarray, fraction: float) -> float:
+    values = np.asarray(density, dtype=float)
+    finite = values[np.isfinite(values) & (values > 0.0)]
+    if finite.size == 0:
+        return np.nan
+    sorted_values = np.sort(finite)[::-1]
+    cumulative = np.cumsum(sorted_values)
+    total = float(cumulative[-1])
+    if not np.isfinite(total) or total <= 0.0:
+        return np.nan
+    target = np.clip(float(fraction), 0.0, 1.0)
+    index = int(np.searchsorted(cumulative / total, target, side="left"))
+    return float(sorted_values[min(index, sorted_values.size - 1)])
 
 
 def _plot_age_metallicity(
@@ -178,6 +188,7 @@ def _plot_age_metallicity_by_origin(
     output_png: Path,
     bandwidth_scale: float,
     metallicity_column: str,
+    contour_fraction: float,
 ) -> dict[str, dict[str, np.ndarray]]:
     observed_weights = np.ones(len(table), dtype=float)
     corrected_weights = table["birth_weight_q50"].to_numpy(dtype=float)
@@ -202,8 +213,6 @@ def _plot_age_metallicity_by_origin(
         ("in_situ", "in situ", "#2f6fbb"),
         ("accreted", "accreted", "#e68a2e"),
     ]
-    all_densities = list(observed_densities.values()) + list(corrected_densities.values())
-    levels = _contour_levels(all_densities)
     fig, axes = plt.subplots(1, 2, figsize=(12.2, 4.8), constrained_layout=True, sharex=True, sharey=True)
     panels = [
         (axes[0], observed_densities, "Observed survivors", observed_weights, float(len(table))),
@@ -215,9 +224,17 @@ def _plot_age_metallicity_by_origin(
             if origin_label not in densities:
                 continue
             density = densities[origin_label]
-            cmap = _single_color_cmap(f"{origin_label}_{title}", color)
-            axis.contourf(feh_grid, age_grid, density, levels=levels, cmap=cmap, alpha=0.42, extend="max")
-            axis.contour(feh_grid, age_grid, density, levels=levels[2::2], colors=color, linewidths=0.95, alpha=0.95)
+            level = _enclosed_fraction_level(density, contour_fraction)
+            if np.isfinite(level):
+                axis.contour(
+                    feh_grid,
+                    age_grid,
+                    density,
+                    levels=[level],
+                    colors=color,
+                    linewidths=1.8,
+                    alpha=0.98,
+                )
 
             subset = table.loc[table["origin_label"] == origin_label]
             indices = subset.index.to_numpy()
@@ -244,7 +261,8 @@ def _plot_age_metallicity_by_origin(
     axes[0].set_ylim(float(age_grid.min()), float(age_grid.max()))
     fig.suptitle(
         rf"Origin-split age--metallicity density, VandenBerg ages, "
-        rf"$w_{{\rm birth}}=1/[S Q]$, KDE bandwidth scale $={bandwidth_scale:.2f}$",
+        rf"{100.0 * contour_fraction:.0f}\% enclosed KDE contours, "
+        rf"$w_{{\rm birth}}=1/[S Q]$, bandwidth scale $={bandwidth_scale:.2f}$",
         fontsize=10,
     )
     output_pdf.parent.mkdir(parents=True, exist_ok=True)
@@ -273,6 +291,7 @@ def main() -> None:
     parser.add_argument("--n-age-grid", type=int, default=180)
     parser.add_argument("--n-feh-grid", type=int, default=180)
     parser.add_argument("--kde-bandwidth-scale", type=float, default=0.90)
+    parser.add_argument("--split-contour-fraction", type=float, default=0.50)
     parser.add_argument("--max-surface-samples", type=int, default=0)
     parser.add_argument("--seed", type=int, default=20260619)
     parser.add_argument("--selection-floor", type=float, default=1.0e-4)
@@ -384,6 +403,7 @@ def main() -> None:
         output_png=args.split_output_png,
         bandwidth_scale=float(args.kde_bandwidth_scale),
         metallicity_column=str(args.metallicity_column),
+        contour_fraction=float(args.split_contour_fraction),
     )
     split_grid = {
         "feh": xx.ravel(),
@@ -406,6 +426,7 @@ def main() -> None:
         "birth_corrected_total_q50": corrected_total,
         "birth_corrected_total_q84": float(np.nanquantile(np.sum(birth_weights, axis=1), 0.84)),
         "kde_bandwidth_scale": float(args.kde_bandwidth_scale),
+        "split_contour_fraction": float(args.split_contour_fraction),
         "outputs": {
             "cluster_weights": str(cluster_path),
             "kde_grid": str(grid_path),
