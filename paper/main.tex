@@ -525,6 +525,49 @@ The conclusion is stable across disruption calibrations. The accreted-labelled c
 \subsection{Comparison with previous constraints on the initial GC mass function}\label{sec:discussion_literature}
 The result of Section~\ref{sec:single_component_results} places the Milky Way in the family of Schechter-like GCIMF models, but with an important qualification: the inferred cutoff is the cutoff required after applying the adopted survivability and detectability filters. It should therefore not be read as a direct measurement of the maximum cluster mass at birth. In this sense our result sits between the two limiting pictures discussed in the Introduction. It does not require the present-day GCMF turnover to have been fully primordial, as in lognormal or gas-expulsion models, but neither does it infer the GCIMF from the present-day mass function alone. The fitted normalization and $M_{\rm c}$ are conditional on the orbit-dependent survival boundary in the $(M_{\rm ini},a)$ plane.
 
+\subsection{Selection-corrected GC properties}\label{sec:discussion_corrected_properties}
+The same selection model can be used to ask how other observed GC properties would look after correcting for the missing progenitors implied by the fitted birth model. For an observed cluster $i$ with measured property $z_i$ and intrinsic coordinates $(M_{{\rm ini},i},a_i)$, each posterior selection-surface draw gives the selected fraction
+\begin{equation}
+p_{{\rm sel},i}^{(k)}
+=
+S^{(k)}(M_{{\rm ini},i},a_i)\,
+Q^{(k)}(M_{{\rm ini},i},a_i).
+\end{equation}
+We therefore assign that cluster an inverse-selection birth weight
+\begin{equation}
+w_{{\rm birth},i}^{(k)} = \left[p_{{\rm sel},i}^{(k)}\right]^{-1},
+\end{equation}
+and, when plotting the implied destroyed contribution on the same observed support, a missing-cluster weight $w_{{\rm dest},i}^{(k)}=w_{{\rm birth},i}^{(k)}-1$. This is not a model for clusters with no surviving analogue in the catalogue. It is the selection-corrected distribution of the progenitors represented by the observed sample, under the same survivability and detectability filters used in the GCIMF inference.
+
+Figure~\ref{fig:detection_corrected_mdf} applies this reweighting to the catalogue metallicities. The observed MDF uses the 164 clusters with finite local metallicities. The birth-corrected MDF has posterior median normalization $465$, with a central 68 per cent range $354$--$647$, while the corresponding missing contribution has median $301$. The correction strengthens the metal-rich component relative to the raw survivor MDF, consistent with the fact that lower-mass clusters on smaller orbits have lower selected fractions.
+
+\begin{figure*}
+    \centering
+    \includegraphics[width=\textwidth]{figures/detection_corrected_metallicity_distribution_kde.pdf}
+    \caption{Selection-corrected metallicity distribution. The black curve shows the observed survivor MDF for the 164 clusters with finite catalogue metallicities. The blue curve shows the birth-corrected MDF obtained by weighting each cluster by $w_{\rm birth}=1/[S(M_{\rm ini},a)Q(M_{\rm ini},a)]$. The orange curve shows the corresponding missing contribution, $w_{\rm dest}=w_{\rm birth}-1$, on the same observed support. Shaded bands show the central 68 per cent range over posterior selection-surface samples.}
+    \label{fig:detection_corrected_mdf}
+\end{figure*}
+
+Figure~\ref{fig:detection_corrected_age_distribution} repeats the exercise for the 55 clusters with ages from \citet{VandenBerg2013}. Because this age sample is incomplete and was not selected by the same process as the full Baumgardt catalogue, the result should be read as a selection-corrected diagnostic of the VandenBerg subsample, not as a complete Galactic GC age distribution. Within that sample, the posterior median birth-corrected total is $115$, with a central 68 per cent range $94$--$148$, and the median missing contribution is $60$. The correction gives more weight to the younger, relatively metal-rich part of the sample, but it does not erase the dominant old population.
+
+\begin{figure*}
+    \centering
+    \includegraphics[width=\textwidth]{figures/detection_corrected_age_distribution_kde.pdf}
+    \caption{Selection-corrected age distribution for the 55 clusters with VandenBerg et al. ages. The curves and shaded bands have the same meaning as in Fig.~\ref{fig:detection_corrected_mdf}. The correction is evaluated with the same posterior $S(M_{\rm ini},a)Q(M_{\rm ini},a)$ surfaces used for the MDF, but only at the locations of the clusters with published ages.}
+    \label{fig:detection_corrected_age_distribution}
+\end{figure*}
+
+The age--metallicity plane gives a more direct view of how the correction acts on the two assembly channels identified by the Belokurov--Kravtsov labels. Figure~\ref{fig:detection_corrected_age_metallicity_origin} shows the VandenBerg age--metallicity sample split into in-situ and accreted classes. The observed subsample contains 30 in-situ and 25 accreted clusters; after median inverse-selection weighting, these become approximately 82 and 33 objects, respectively. The correction therefore increases the relative importance of the in-situ-labelled part of the age--metallicity plane in this subsample. This is the same behaviour found in the labelled two-component birth model: the accreted component is visible and chemically distinct, but most of the selection-corrected progenitor count remains associated with the in-situ-labelled population.
+
+\begin{figure*}
+    \centering
+    \includegraphics[width=\textwidth]{figures/detection_corrected_age_metallicity_by_origin.pdf}
+    \caption{Origin-split age--metallicity density for the 55 clusters with VandenBerg et al. ages and metallicities. Blue denotes in-situ-labelled clusters and orange denotes accreted-labelled clusters. Left: observed survivor sample. Right: birth-corrected sample, with point sizes scaled by the median inverse-selection weight. Contours show the 5, 10, 20, 40, and 60 per cent enclosed KDE density levels, computed separately for each origin class and panel; they therefore compare the shape of each distribution rather than absolute density between panels.}
+    \label{fig:detection_corrected_age_metallicity_origin}
+\end{figure*}
+
+\clearpage
+
 \subsection{A lower bound on the initial GC population}\label{sec:lower_bound}
 The present analysis constrains the progenitors of the \emph{surviving} Milky Way GC family. It does not constrain a completely destroyed population that leaves no surviving counterpart in the current catalogue. In that sense the fitted normalization is intentionally conservative: it is the number of progenitors required to explain the observed survivors once survivability and detectability are treated self-consistently, not the total number of clusters that may once have formed in the proto-Milky Way.
 
