@@ -19,6 +19,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy.interpolate import RegularGridInterpolator
+from scipy import stats
 
 
 DEFAULT_VARIANT = "profile_map_and_exact_mcmc_schechter_logpoly3_logistic_global_monotonic_q"
@@ -26,6 +27,8 @@ DEFAULT_CATALOG = PROJECT_ROOT / "data" / "processed" / "baumgardt_gc_catalog_wi
 DEFAULT_OUTPUT_ROOT = PROJECT_ROOT / "outputs" / "tables"
 DEFAULT_FIGURE_PDF = PROJECT_ROOT / "paper" / "figures" / "detection_corrected_metallicity_distribution.pdf"
 DEFAULT_FIGURE_PNG = PROJECT_ROOT / "paper" / "figures" / "detection_corrected_metallicity_distribution.png"
+DEFAULT_KDE_FIGURE_PDF = PROJECT_ROOT / "paper" / "figures" / "detection_corrected_metallicity_distribution_kde.pdf"
+DEFAULT_KDE_FIGURE_PNG = PROJECT_ROOT / "paper" / "figures" / "detection_corrected_metallicity_distribution_kde.png"
 
 
 def _weighted_histogram_density(
@@ -43,6 +46,34 @@ def _normalized_density(density: np.ndarray, edges: np.ndarray) -> np.ndarray:
     if not np.isfinite(integral) or integral <= 0.0:
         return np.full_like(density, np.nan, dtype=float)
     return density / integral
+
+
+def _normalized_curve(density: np.ndarray, x_grid: np.ndarray) -> np.ndarray:
+    integral = float(np.trapezoid(np.asarray(density, dtype=float), np.asarray(x_grid, dtype=float)))
+    if not np.isfinite(integral) or integral <= 0.0:
+        return np.full_like(density, np.nan, dtype=float)
+    return density / integral
+
+
+def _kde_density(
+    values: np.ndarray,
+    weights: np.ndarray,
+    x_grid: np.ndarray,
+    bandwidth_scale: float,
+) -> np.ndarray:
+    values = np.asarray(values, dtype=float)
+    weights = np.asarray(weights, dtype=float)
+    finite = np.isfinite(values) & np.isfinite(weights) & (weights > 0.0)
+    if finite.sum() < 2:
+        return np.full_like(x_grid, np.nan, dtype=float)
+
+    scale = float(bandwidth_scale)
+
+    def bw_method(kde: stats.gaussian_kde) -> float:
+        return kde.scotts_factor() * scale
+
+    kde = stats.gaussian_kde(values[finite], weights=weights[finite], bw_method=bw_method)
+    return np.asarray(kde(x_grid), dtype=float) * float(np.sum(weights[finite]))
 
 
 def _load_surface_archives(
@@ -232,6 +263,49 @@ def _build_mdf_tables(
     return pd.DataFrame(rows), totals
 
 
+def _build_kde_tables(
+    *,
+    feh: np.ndarray,
+    selection_samples: np.ndarray,
+    x_grid: np.ndarray,
+    bandwidth_scale: float,
+) -> pd.DataFrame:
+    observed_density = _kde_density(feh, np.ones_like(feh), x_grid, bandwidth_scale)
+    observed_normalized = _normalized_curve(observed_density, x_grid)
+
+    birth_densities = []
+    missing_densities = []
+    for selection in selection_samples:
+        birth_weight = 1.0 / selection
+        missing_weight = birth_weight - 1.0
+        birth_densities.append(_kde_density(feh, birth_weight, x_grid, bandwidth_scale))
+        missing_densities.append(_kde_density(feh, missing_weight, x_grid, bandwidth_scale))
+
+    birth_densities = np.asarray(birth_densities, dtype=float)
+    missing_densities = np.asarray(missing_densities, dtype=float)
+    birth_norm = np.asarray([_normalized_curve(row, x_grid) for row in birth_densities])
+    missing_norm = np.asarray([_normalized_curve(row, x_grid) for row in missing_densities])
+
+    rows = []
+    for index, feh_value in enumerate(x_grid):
+        row = {
+            "feh": float(feh_value),
+            "observed_density": float(observed_density[index]),
+            "observed_normalized_density": float(observed_normalized[index]),
+        }
+        for prefix, table in (
+            ("birth_corrected_density", birth_densities),
+            ("missing_density", missing_densities),
+            ("birth_corrected_normalized_density", birth_norm),
+            ("missing_normalized_density", missing_norm),
+        ):
+            row[f"{prefix}_q16"] = float(np.nanquantile(table[:, index], 0.16))
+            row[f"{prefix}_q50"] = float(np.nanquantile(table[:, index], 0.50))
+            row[f"{prefix}_q84"] = float(np.nanquantile(table[:, index], 0.84))
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
 def _plot_mdf(table: pd.DataFrame, totals: dict[str, float], output_pdf: Path, output_png: Path) -> None:
     x = table["feh_center"].to_numpy(dtype=float)
     edges = np.concatenate(
@@ -337,6 +411,111 @@ def _plot_mdf(table: pd.DataFrame, totals: dict[str, float], output_pdf: Path, o
     plt.close(fig)
 
 
+def _plot_kde_mdf(
+    table: pd.DataFrame,
+    totals: dict[str, float],
+    output_pdf: Path,
+    output_png: Path,
+    bandwidth_scale: float,
+) -> None:
+    x = table["feh"].to_numpy(dtype=float)
+
+    fig, axes = plt.subplots(1, 2, figsize=(11.8, 4.6), constrained_layout=True)
+    observed_color = "#222222"
+    birth_color = "#2f6fbb"
+    missing_color = "#c44e52"
+
+    axes[0].plot(
+        x,
+        table["observed_density"],
+        color=observed_color,
+        linewidth=1.8,
+        label=f"Observed survivors ({int(totals['n_observed_with_valid_feh'])})",
+    )
+    axes[0].plot(x, table["birth_corrected_density_q50"], color=birth_color, linewidth=2.1, label="Birth-corrected")
+    axes[0].fill_between(
+        x,
+        table["birth_corrected_density_q16"],
+        table["birth_corrected_density_q84"],
+        color=birth_color,
+        alpha=0.18,
+        linewidth=0,
+    )
+    axes[0].plot(x, table["missing_density_q50"], color=missing_color, linewidth=1.8, ls="--", label="Destroyed only")
+    axes[0].fill_between(
+        x,
+        table["missing_density_q16"],
+        table["missing_density_q84"],
+        color=missing_color,
+        alpha=0.13,
+        linewidth=0,
+    )
+    axes[0].set_yscale("log")
+    axes[0].set_ylim(bottom=0.8)
+    axes[0].set_xlabel(r"$[{\rm Fe/H}]$")
+    axes[0].set_ylabel(r"$dN/d[{\rm Fe/H}]$")
+    axes[0].legend(frameon=False, fontsize=8.5)
+    axes[0].set_title("Absolute counts")
+
+    axes[1].plot(
+        x,
+        table["observed_normalized_density"],
+        color=observed_color,
+        linewidth=1.8,
+        label="Observed survivors",
+    )
+    axes[1].plot(
+        x,
+        table["birth_corrected_normalized_density_q50"],
+        color=birth_color,
+        linewidth=2.1,
+        label="Birth-corrected",
+    )
+    axes[1].fill_between(
+        x,
+        table["birth_corrected_normalized_density_q16"],
+        table["birth_corrected_normalized_density_q84"],
+        color=birth_color,
+        alpha=0.18,
+        linewidth=0,
+    )
+    axes[1].plot(
+        x,
+        table["missing_normalized_density_q50"],
+        color=missing_color,
+        linewidth=1.8,
+        ls="--",
+        label="Destroyed only",
+    )
+    axes[1].fill_between(
+        x,
+        table["missing_normalized_density_q16"],
+        table["missing_normalized_density_q84"],
+        color=missing_color,
+        alpha=0.13,
+        linewidth=0,
+    )
+    axes[1].set_xlabel(r"$[{\rm Fe/H}]$")
+    axes[1].set_ylabel(r"Probability density")
+    axes[1].set_title("Normalized MDF shape")
+    axes[1].legend(frameon=False, fontsize=8.5)
+
+    for axis in axes:
+        axis.set_xlim(float(x.min()), float(x.max()))
+        axis.grid(alpha=0.18, linewidth=0.7)
+
+    subtitle = (
+        r"KDE, $w_{\rm birth}=1/[S(M_{\rm ini},a)Q(M_{\rm ini},a)]$, "
+        rf"bandwidth scale $={bandwidth_scale:.2f}$"
+    )
+    fig.suptitle(subtitle, fontsize=10)
+    output_pdf.parent.mkdir(parents=True, exist_ok=True)
+    output_png.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_pdf)
+    fig.savefig(output_png, dpi=220)
+    plt.close(fig)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--variant", default=DEFAULT_VARIANT)
@@ -344,9 +523,13 @@ def main() -> None:
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     parser.add_argument("--output-pdf", type=Path, default=DEFAULT_FIGURE_PDF)
     parser.add_argument("--output-png", type=Path, default=DEFAULT_FIGURE_PNG)
+    parser.add_argument("--kde-output-pdf", type=Path, default=DEFAULT_KDE_FIGURE_PDF)
+    parser.add_argument("--kde-output-png", type=Path, default=DEFAULT_KDE_FIGURE_PNG)
     parser.add_argument("--feh-min", type=float, default=-2.6)
     parser.add_argument("--feh-max", type=float, default=0.0)
     parser.add_argument("--feh-bin-width", type=float, default=0.2)
+    parser.add_argument("--kde-n-grid", type=int, default=500)
+    parser.add_argument("--kde-bandwidth-scale", type=float, default=0.85)
     parser.add_argument("--max-surface-samples", type=int, default=0)
     parser.add_argument("--seed", type=int, default=20260619)
     parser.add_argument("--selection-floor", type=float, default=1.0e-4)
@@ -401,6 +584,13 @@ def main() -> None:
         selection_samples=selection_samples,
         edges=edges,
     )
+    kde_grid = np.linspace(float(args.feh_min), float(args.feh_max), int(args.kde_n_grid))
+    kde_table = _build_kde_tables(
+        feh=working["local_feh"].to_numpy(dtype=float),
+        selection_samples=selection_samples,
+        x_grid=kde_grid,
+        bandwidth_scale=float(args.kde_bandwidth_scale),
+    )
     cluster_weights = _cluster_weight_table(
         working,
         selection_samples,
@@ -410,10 +600,12 @@ def main() -> None:
 
     args.output_root.mkdir(parents=True, exist_ok=True)
     mdf_path = args.output_root / "detection_corrected_mdf.csv"
+    kde_path = args.output_root / "detection_corrected_mdf_kde.csv"
     weights_path = args.output_root / "detection_corrected_mdf_cluster_weights.csv"
     surface_meta_path = args.output_root / "detection_corrected_mdf_surface_samples.csv"
     summary_path = args.output_root / "detection_corrected_mdf_summary.json"
     mdf_table.to_csv(mdf_path, index=False)
+    kde_table.to_csv(kde_path, index=False)
     cluster_weights.to_csv(weights_path, index=False)
     surface_metadata.to_csv(surface_meta_path, index=False)
     summary = {
@@ -425,17 +617,29 @@ def main() -> None:
         "selection_floor": float(args.selection_floor),
         "n_selection_coordinates_clipped": int(np.any(~np.isclose(points, clipped_points), axis=1).sum()),
         "feh_edges": [float(value) for value in edges],
+        "kde_n_grid": int(args.kde_n_grid),
+        "kde_bandwidth_scale": float(args.kde_bandwidth_scale),
         "totals": totals,
         "outputs": {
             "mdf_table": str(mdf_path),
+            "kde_table": str(kde_path),
             "cluster_weights": str(weights_path),
             "surface_samples": str(surface_meta_path),
             "figure_pdf": str(args.output_pdf),
             "figure_png": str(args.output_png),
+            "kde_figure_pdf": str(args.kde_output_pdf),
+            "kde_figure_png": str(args.kde_output_png),
         },
     }
     summary_path.write_text(json.dumps(summary, indent=2))
     _plot_mdf(mdf_table, totals, args.output_pdf, args.output_png)
+    _plot_kde_mdf(
+        kde_table,
+        totals,
+        args.kde_output_pdf,
+        args.kde_output_png,
+        bandwidth_scale=float(args.kde_bandwidth_scale),
+    )
     print(json.dumps(summary, indent=2))
 
 
