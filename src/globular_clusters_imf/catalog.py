@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 import io
+import json
 import os
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -408,11 +411,69 @@ def robust_scatter(values: np.ndarray) -> float:
 
 
 def download_text(url: str, destination: Path) -> str:
+    """Download a Baumgardt table, recording exactly what was fetched.
+
+    The raw HTML is gitignored and overwritten in place on every run, so without a
+    manifest there is no record of *which* version of a live, periodically-updated
+    web table produced any given set of published numbers. Re-running the pipeline
+    six months apart would silently give different answers with nothing to show for
+    it. The manifest below (checksum + byte count + fetch time + any HTTP
+    Last-Modified) is what makes a result traceable to its input.
+    """
     response = requests.get(url, timeout=DEFAULT_TIMEOUT_SECONDS)
     response.raise_for_status()
     text = response.text
     destination.write_text(text)
+    write_download_manifest(url=url, destination=destination, text=text, response=response)
     return text
+
+
+def write_download_manifest(url: str, destination: Path, text: str, response=None) -> Path:
+    """Record the provenance of a downloaded table next to it."""
+    payload = {
+        "url": url,
+        "local_path": destination.name,
+        "retrieved_utc": datetime.now(timezone.utc).isoformat(),
+        "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        "n_bytes": len(text.encode("utf-8")),
+    }
+    if response is not None:
+        payload["http_last_modified"] = response.headers.get("Last-Modified", "")
+        payload["http_etag"] = response.headers.get("ETag", "")
+    manifest_path = destination.with_suffix(destination.suffix + ".manifest.json")
+    manifest_path.write_text(json.dumps(payload, indent=2))
+    return manifest_path
+
+
+def read_download_manifest(destination: Path) -> dict[str, object] | None:
+    manifest_path = destination.with_suffix(destination.suffix + ".manifest.json")
+    if not manifest_path.exists():
+        return None
+    return json.loads(manifest_path.read_text())
+
+
+def verify_catalog_provenance(project_root: Path) -> pd.DataFrame:
+    """Report the recorded provenance of every raw table backing the results.
+
+    Fails loudly on a table with no manifest: an unprovenanced input is not a
+    reproducible one, and this is the check that says so before a paper is built.
+    """
+    data_raw = project_root / "data" / "raw"
+    rows: list[dict[str, object]] = []
+    for name in ("baumgardt_orbits.html", "baumgardt_parameters.html"):
+        path = data_raw / name
+        manifest = read_download_manifest(path) if path.exists() else None
+        rows.append(
+            {
+                "table": name,
+                "present": path.exists(),
+                "has_manifest": manifest is not None,
+                "sha256": (manifest or {}).get("sha256", ""),
+                "retrieved_utc": (manifest or {}).get("retrieved_utc", ""),
+                "http_last_modified": (manifest or {}).get("http_last_modified", ""),
+            }
+        )
+    return pd.DataFrame(rows)
 
 
 def parse_orbits_table(html_text: str) -> pd.DataFrame:
@@ -667,11 +728,22 @@ def normalize_numeric_text(text: str) -> str:
 
 
 def parse_power_of_ten_suffix(text: str) -> float:
+    """Turn the Baumgardt '· 10^n' suffix (rendered as e.g. '105') into a scale factor.
+
+    The fallback used to be `float(digits)`, which meant an unexpected suffix such as
+    '20' quietly became a multiplier of 20 rather than a power of ten -- silently
+    corrupting a mass by a factor of 5x10^4 instead of failing. Anything that is not
+    recognisably a power of ten is now an error.
+    """
     digits = re.sub(r"\D", "", text)
     if digits.startswith("10") and len(digits) > 2:
-        exponent = int(digits[2:])
-        return float(10**exponent)
-    return float(digits)
+        return float(10 ** int(digits[2:]))
+    if digits == "10":
+        return 10.0
+    raise ValueError(
+        f"Unrecognised power-of-ten suffix {text!r} in the Baumgardt table. "
+        "Refusing to guess a scale factor: that silently corrupts masses."
+    )
 
 
 def canonical_cluster_name(label: str) -> str:

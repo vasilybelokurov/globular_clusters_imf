@@ -136,19 +136,6 @@ def _draw_initial_positions(center: np.ndarray, rng: np.random.Generator) -> lis
     return positions
 
 
-def _compute_rhat(chains: np.ndarray) -> float:
-    # chains shape: (n_chains, n_samples)
-    m, n = chains.shape
-    if m < 2 or n < 2:
-        return float("nan")
-    chain_means = np.mean(chains, axis=1)
-    chain_vars = np.var(chains, axis=1, ddof=1)
-    b = n * np.var(chain_means, ddof=1)
-    w = np.mean(chain_vars)
-    if w <= 0.0:
-        return float("nan")
-    var_hat = ((n - 1) / n) * w + (1 / n) * b
-    return float(np.sqrt(var_hat / w))
 
 
 def _corner_plot(samples: pd.DataFrame, mle_row: dict[str, object], output_path: Path) -> None:
@@ -216,6 +203,9 @@ def _trace_plot(chain_table: pd.DataFrame, output_path: Path) -> None:
     fig.tight_layout()
     fig.savefig(output_path, dpi=220)
     plt.close(fig)
+
+
+from globular_clusters_imf.mcmc_diagnostics import compute_rhat as _compute_rhat
 
 
 def main() -> None:

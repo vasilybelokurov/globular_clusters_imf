@@ -17,6 +17,7 @@ import numpy as np
 import pandas as pd
 from matplotlib.colors import LinearSegmentedColormap
 from scipy import optimize, special
+from globular_clusters_imf.mass_grid import DEFAULT_LOG_MASS_MAX, DEFAULT_LOG_MASS_MIN, DEFAULT_N_MASS_GRID
 
 
 def compute_eta_t_equivalent_to_current_shift(catalog: pd.DataFrame, selection_offset_dex: float) -> float:
@@ -39,7 +40,7 @@ def build_raw_survival_grid_from_eta_t(
     *,
     eta_t: float,
     n_radius_grid: int = 160,
-    n_mass_grid: int = 180,
+    n_mass_grid: int = DEFAULT_N_MASS_GRID,
     bandwidth_log10_a_dex: float = 0.18,
 ) -> dict[str, object]:
     from globular_clusters_imf.model import AGE_MYR, survival_mass_cut_msun
@@ -62,8 +63,8 @@ def build_raw_survival_grid_from_eta_t(
     log_cut_data = working["log_renormalized_survival_mass_cut_msun"].to_numpy(dtype=float)
 
     log_a_grid = np.linspace(log_a_data.min(), log_a_data.max(), n_radius_grid)
-    log_mass_min = min(3.5, float(np.floor(working["log_initial_mass_msun"].min() * 10.0) / 10.0))
-    log_mass_max = max(7.3, float(np.ceil(working["log_initial_mass_msun"].max() * 10.0) / 10.0))
+    log_mass_min = DEFAULT_LOG_MASS_MIN
+    log_mass_max = DEFAULT_LOG_MASS_MAX
     log_mass_grid = np.linspace(log_mass_min, log_mass_max, n_mass_grid)
 
     weights = np.exp(

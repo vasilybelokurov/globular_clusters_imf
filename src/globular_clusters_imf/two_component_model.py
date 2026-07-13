@@ -43,8 +43,8 @@ class TwoComponentJointFitResult:
     total_initial_count_in_situ: float
     total_initial_count_accreted: float
     total_initial_count: float
-    survival_fraction_in_situ: float
-    survival_fraction_accreted: float
+    selection_fraction_in_situ: float
+    selection_fraction_accreted: float
 
 
 @dataclass(frozen=True)
@@ -76,8 +76,8 @@ class SharedImfTwoComponentJointFitResult:
     total_initial_count_in_situ: float
     total_initial_count_accreted: float
     total_initial_count: float
-    survival_fraction_in_situ: float
-    survival_fraction_accreted: float
+    selection_fraction_in_situ: float
+    selection_fraction_accreted: float
     shared_imf_parameters_json: str
     in_situ_radial_parameters_json: str
     accreted_radial_parameters_json: str
@@ -99,8 +99,8 @@ class SplitAlphaTwoComponentJointFitResult:
     total_initial_count_in_situ: float
     total_initial_count_accreted: float
     total_initial_count: float
-    survival_fraction_in_situ: float
-    survival_fraction_accreted: float
+    selection_fraction_in_situ: float
+    selection_fraction_accreted: float
     shared_log10_m_c_msun: float
     in_situ_alpha_dndm: float
     accreted_alpha_dndm: float
@@ -500,8 +500,8 @@ def fit_shared_imf_two_component_single_model(
         total_initial_count=float(
             model["total_initial_count"]["in_situ"] + model["total_initial_count"]["accreted"]
         ),
-        survival_fraction_in_situ=float(model["survival_fraction"]["in_situ"]),
-        survival_fraction_accreted=float(model["survival_fraction"]["accreted"]),
+        selection_fraction_in_situ=float(model["selection_fraction"]["in_situ"]),
+        selection_fraction_accreted=float(model["selection_fraction"]["accreted"]),
         shared_imf_parameters_json=json.dumps(model["imf_parameters"]),
         in_situ_radial_parameters_json=json.dumps(model["radial_parameters"]["in_situ"]),
         accreted_radial_parameters_json=json.dumps(model["radial_parameters"]["accreted"]),
@@ -561,8 +561,8 @@ def fit_split_alpha_two_component_single_model(
         total_initial_count=float(
             model["total_initial_count"]["in_situ"] + model["total_initial_count"]["accreted"]
         ),
-        survival_fraction_in_situ=float(model["survival_fraction"]["in_situ"]),
-        survival_fraction_accreted=float(model["survival_fraction"]["accreted"]),
+        selection_fraction_in_situ=float(model["selection_fraction"]["in_situ"]),
+        selection_fraction_accreted=float(model["selection_fraction"]["accreted"]),
         shared_log10_m_c_msun=float(model["shared_log10_m_c_msun"]),
         in_situ_alpha_dndm=float(in_situ_imf_parameters["alpha_dndm"]),
         accreted_alpha_dndm=float(accreted_imf_parameters["alpha_dndm"]),
@@ -717,14 +717,14 @@ def shared_negative_profile_log_likelihood(
         return 1.0e30
     if any(np.any(values <= 0.0) for values in model["radial_density_data"].values()):
         return 1.0e30
-    if any(value <= 0.0 for value in model["survival_fraction"].values()):
+    if any(value <= 0.0 for value in model["selection_fraction"].values()):
         return 1.0e30
 
     profile_log_like = 0.0
     for component_label, context in contexts.items():
         profile_log_like += np.sum(np.log(model["imf_density_data"][component_label]))
         profile_log_like += np.sum(np.log(model["radial_density_data"][component_label]))
-        profile_log_like -= len(context.log_mass_data) * np.log(model["survival_fraction"][component_label])
+        profile_log_like -= len(context.log_mass_data) * np.log(model["selection_fraction"][component_label])
     return float(-profile_log_like)
 
 
@@ -738,14 +738,14 @@ def split_alpha_negative_profile_log_likelihood(
         return 1.0e30
     if any(np.any(values <= 0.0) for values in model["radial_density_data"].values()):
         return 1.0e30
-    if any(value <= 0.0 for value in model["survival_fraction"].values()):
+    if any(value <= 0.0 for value in model["selection_fraction"].values()):
         return 1.0e30
 
     profile_log_like = 0.0
     for component_label, context in contexts.items():
         profile_log_like += np.sum(np.log(model["imf_density_data"][component_label]))
         profile_log_like += np.sum(np.log(model["radial_density_data"][component_label]))
-        profile_log_like -= len(context.log_mass_data) * np.log(model["survival_fraction"][component_label])
+        profile_log_like -= len(context.log_mass_data) * np.log(model["selection_fraction"][component_label])
     return float(-profile_log_like)
 
 
@@ -949,7 +949,7 @@ def shared_full_log_likelihood_from_model(
         total_initial_count = float(model["total_initial_count"][component_label])
         total += (
             len(context.log_mass_data) * np.log(total_initial_count)
-            - total_initial_count * model["survival_fraction"][component_label]
+            - total_initial_count * model["selection_fraction"][component_label]
             + np.sum(np.log(np.clip(model["imf_density_data"][component_label], 1.0e-12, None)))
             + np.sum(np.log(np.clip(model["radial_density_data"][component_label], 1.0e-12, None)))
             + np.sum(np.log(selection_data))
@@ -971,7 +971,7 @@ def split_alpha_full_log_likelihood_from_model(
         total_initial_count = float(model["total_initial_count"][component_label])
         total += (
             len(context.log_mass_data) * np.log(total_initial_count)
-            - total_initial_count * model["survival_fraction"][component_label]
+            - total_initial_count * model["selection_fraction"][component_label]
             + np.sum(np.log(np.clip(model["imf_density_data"][component_label], 1.0e-12, None)))
             + np.sum(np.log(np.clip(model["radial_density_data"][component_label], 1.0e-12, None)))
             + np.sum(np.log(selection_data))
@@ -1000,7 +1000,7 @@ def build_shared_best_component_summary_table(
                 "bic": float(summary.bic),
                 "n_parameters": int(summary.n_parameters),
                 "total_initial_count": float(best_payload["model"]["total_initial_count"][component_label]),
-                "survival_fraction": float(best_payload["model"]["survival_fraction"][component_label]),
+                "survival_fraction": float(best_payload["model"]["selection_fraction"][component_label]),
                 "shared_imf_parameters_json": summary.shared_imf_parameters_json,
                 "radial_parameters_json": json.dumps(best_payload["model"]["radial_parameters"][component_label]),
             }
@@ -1027,7 +1027,7 @@ def split_alpha_component_payloads_from_best_payload(
                 "radial_density_data": best_payload["model"]["radial_density_data"][component_label],
                 "selection_fraction": best_payload["model"]["selection_fraction"][component_label],
                 "raw_survival_fraction": best_payload["model"]["raw_survival_fraction"][component_label],
-                "survival_fraction": best_payload["model"]["survival_fraction"][component_label],
+                "survival_fraction": best_payload["model"]["selection_fraction"][component_label],
                 "total_initial_count": best_payload["model"]["total_initial_count"][component_label],
             },
         }
@@ -1055,7 +1055,7 @@ def build_split_alpha_best_component_summary_table(
                 "bic": float(summary.bic),
                 "n_parameters": int(summary.n_parameters),
                 "total_initial_count": float(best_payload["model"]["total_initial_count"][component_label]),
-                "survival_fraction": float(best_payload["model"]["survival_fraction"][component_label]),
+                "survival_fraction": float(best_payload["model"]["selection_fraction"][component_label]),
                 "shared_log10_m_c_msun": float(summary.shared_log10_m_c_msun),
                 "alpha_dndm": float(best_payload["model"]["imf_parameters"][component_label]["alpha_dndm"]),
                 "imf_parameters_json": json.dumps(best_payload["model"]["imf_parameters"][component_label]),
@@ -1246,8 +1246,8 @@ def build_two_component_pair_payloads(
             total_initial_count_in_situ=total_initial_count_in_situ,
             total_initial_count_accreted=total_initial_count_accreted,
             total_initial_count=total_initial_count_in_situ + total_initial_count_accreted,
-            survival_fraction_in_situ=float(in_summary.survival_fraction),
-            survival_fraction_accreted=float(acc_summary.survival_fraction),
+            selection_fraction_in_situ=float(in_summary.selection_fraction),
+            selection_fraction_accreted=float(acc_summary.selection_fraction),
         )
         pair_payloads.append(
             {
@@ -1282,7 +1282,7 @@ def best_pair_component_row(
         "bic": float(summary.bic),
         "n_parameters": int(summary.n_parameters),
         "total_initial_count": float(summary.total_initial_count),
-        "survival_fraction": float(summary.survival_fraction),
+        "survival_fraction": float(summary.selection_fraction),
         "imf_parameters_json": summary.imf_parameters_json,
         "radial_parameters_json": summary.radial_parameters_json,
     }

@@ -8,7 +8,20 @@ import numpy as np
 import pandas as pd
 from scipy import interpolate, optimize, stats
 
+from .mass_grid import (
+    DEFAULT_LOG_MASS_MAX,
+    DEFAULT_LOG_MASS_MIN,
+    DEFAULT_N_MASS_GRID,
+    build_log_mass_grid,
+    check_grid_covers_survival_support,
+    describe_mass_grid,
+)
+
 TINY = 1.0e-300
+
+
+class NonPositiveDefiniteHessianError(RuntimeError):
+    """Raised when asymptotic errors are requested at a non-minimum."""
 
 
 @dataclass(frozen=True)
@@ -27,7 +40,17 @@ class JointFitResult:
     bic: float
     n_parameters: int
     total_initial_count: float
-    survival_fraction: float
+    # Fraction of formed clusters that both survive AND are detected. When no
+    # detectability correction is applied this equals the survival fraction, but
+    # under the detectability EM it is strictly smaller. It was previously named
+    # `survival_fraction`, which mislabelled the detectability-corrected outputs.
+    selection_fraction: float
+    # Raw survival fraction with detectability divided out. Equal to
+    # selection_fraction in the uncorrected fit.
+    raw_survival_fraction: float
+    # N0 counts clusters formed ABOVE this mass. It is a declared assumption, not
+    # an inference, and N0 scales steeply with it. Never quote N0 without it.
+    n0_log_mass_min: float
     optimizer_message: str
     imf_parameters_json: str
     radial_parameters_json: str
@@ -200,23 +223,46 @@ def build_fixed_survival_grid(
     catalog: pd.DataFrame,
     selection_offset_dex: float,
     n_radius_grid: int = 160,
-    n_mass_grid: int = 180,
+    log_mass_min: float = DEFAULT_LOG_MASS_MIN,
+    log_mass_max: float = DEFAULT_LOG_MASS_MAX,
+    n_mass_grid: int = DEFAULT_N_MASS_GRID,
     bandwidth_log10_a_dex: float = 0.18,
+    log_mass_min_is_physical: bool = False,
 ) -> dict[str, object]:
+    """Build the fixed survival map S(log M, log a) on the declared mass grid.
+
+    ``log_mass_min`` is the lower cluster-formation mass: every ``N0`` derived
+    from this grid is a count of clusters formed *above* it, and N0 scales
+    steeply with it (a factor ~10 between 3.5 and 2.0 dex). It is an explicit
+    modelling assumption -- see ``mass_grid`` for why it must not be left to a
+    hard-coded grid edge.
+    """
     log_a_data = np.log10(catalog["semi_major_axis_kpc"].to_numpy())
     effective_log_cut_data = catalog["log_survival_mass_cut_msun"].to_numpy() + selection_offset_dex
 
     log_a_grid = np.linspace(log_a_data.min(), log_a_data.max(), n_radius_grid)
-    log_mass_min = min(3.5, float(np.floor(catalog["log_initial_mass_msun"].min() * 10.0) / 10.0))
-    log_mass_max = max(7.3, float(np.ceil(catalog["log_initial_mass_msun"].max() * 10.0) / 10.0))
-    log_mass_grid = np.linspace(log_mass_min, log_mass_max, n_mass_grid)
+    log_mass_grid = build_log_mass_grid(
+        log_mass_min=log_mass_min,
+        log_mass_max=log_mass_max,
+        n_mass_grid=n_mass_grid,
+    )
+    grid_diagnostics = check_grid_covers_survival_support(
+        log_mass_grid=log_mass_grid,
+        effective_log_mass_cuts=effective_log_cut_data,
+        log_mass_min_is_physical=log_mass_min_is_physical,
+    )
 
     weights = np.exp(
         -0.5 * np.square((log_a_grid[:, None] - log_a_data[None, :]) / bandwidth_log10_a_dex)
     )
     weights /= np.clip(weights.sum(axis=1, keepdims=True), 1.0e-12, None)
 
-    survival_probability = (log_mass_grid[:, None] >= effective_log_cut_data[None, :]) @ weights.T
+    # The kernel weights sum to 1 per row, so this matmul is a convex combination of
+    # 0/1 indicators and is mathematically in [0, 1] -- but floating-point summation
+    # lands it at 1.0000000000000002, and downstream code treats it as a probability.
+    survival_probability = np.clip(
+        (log_mass_grid[:, None] >= effective_log_cut_data[None, :]) @ weights.T, 0.0, 1.0
+    )
     return {
         "log_mass_grid": log_mass_grid,
         "log_a_grid": log_a_grid,
@@ -224,6 +270,9 @@ def build_fixed_survival_grid(
         "survival_probability": survival_probability,
         "selection_offset_dex": selection_offset_dex,
         "bandwidth_log10_a_dex": bandwidth_log10_a_dex,
+        "log_mass_min_is_physical": bool(log_mass_min_is_physical),
+        "grid_diagnostics": grid_diagnostics,
+        **describe_mass_grid(log_mass_grid),
     }
 
 
@@ -334,7 +383,9 @@ def fit_single_joint_model(context: JointLikelihoodContext, spec: JointModelSpec
         bic=float(np.log(n_data) * n_parameters - 2 * log_likelihood),
         n_parameters=n_parameters,
         total_initial_count=float(model["total_initial_count"]),
-        survival_fraction=float(model["survival_fraction"]),
+        selection_fraction=float(model["selection_fraction"]),
+        raw_survival_fraction=float(model["raw_survival_fraction"]),
+        n0_log_mass_min=float(model["n0_log_mass_min"]),
         optimizer_message=str(best_result.message),
         imf_parameters_json=json.dumps(model["imf_parameters"]),
         radial_parameters_json=json.dumps(model["radial_parameters"]),
@@ -404,7 +455,9 @@ def fit_single_joint_model_with_fixed_imf_params(
         bic=float(np.log(n_data) * n_parameters - 2 * log_likelihood),
         n_parameters=n_parameters,
         total_initial_count=float(model["total_initial_count"]),
-        survival_fraction=float(model["survival_fraction"]),
+        selection_fraction=float(model["selection_fraction"]),
+        raw_survival_fraction=float(model["raw_survival_fraction"]),
+        n0_log_mass_min=float(model["n0_log_mass_min"]),
         optimizer_message=str(best_result.message),
         imf_parameters_json=json.dumps(model["imf_parameters"]),
         radial_parameters_json=json.dumps(model["radial_parameters"]),
@@ -430,12 +483,12 @@ def negative_profile_log_likelihood(
     model = unpack_model(params, context=context, spec=spec)
     if np.any(model["imf_density_data"] <= 0.0) or np.any(model["radial_density_data"] <= 0.0):
         return 1.0e30
-    if model["survival_fraction"] <= 0.0:
+    if model["selection_fraction"] <= 0.0:
         return 1.0e30
     profile_log_like = (
         np.sum(np.log(model["imf_density_data"]))
         + np.sum(np.log(model["radial_density_data"]))
-        - len(context.log_mass_data) * np.log(model["survival_fraction"])
+        - len(context.log_mass_data) * np.log(model["selection_fraction"])
     )
     return float(-profile_log_like + imf_smoothness_penalty(params, spec=spec))
 
@@ -458,7 +511,7 @@ def full_log_likelihood_from_model(model: dict[str, object], context: JointLikel
     total_initial_count = float(model["total_initial_count"])
     return float(
         len(context.log_mass_data) * np.log(total_initial_count)
-        - total_initial_count * model["survival_fraction"]
+        - total_initial_count * model["selection_fraction"]
         + np.sum(np.log(np.clip(model["imf_density_data"], 1.0e-12, None)))
         + np.sum(np.log(np.clip(model["radial_density_data"], 1.0e-12, None)))
         + np.sum(np.log(selection_data))
@@ -502,10 +555,14 @@ def unpack_model(params: np.ndarray, context: JointLikelihoodContext, spec: Join
         "imf_density_data": imf_density_data,
         "radial_density_grid": radial_density_grid,
         "radial_density_data": radial_density_data,
-        "survival_fraction": selection_fraction,
+        # `selection_fraction` = survival x detectability. There used to be a
+        # `survival_fraction` alias here pointing at the same value, which caused
+        # detectability-corrected selection fractions to be published under a
+        # `survival_fraction` heading. Use the explicit names.
         "selection_fraction": selection_fraction,
         "raw_survival_fraction": raw_survival_fraction,
         "total_initial_count": total_initial_count,
+        "n0_log_mass_min": float(context.log_mass_grid[0]),
         "imf_parameters": imf_parameters,
         "radial_parameters": radial_parameters,
     }
@@ -886,14 +943,27 @@ def estimate_parameter_covariance(
     objective = lambda params: negative_profile_log_likelihood(params, context=context, spec=spec)
     hessian = finite_difference_hessian(objective, best_params, bounds=bounds)
     hessian = 0.5 * (hessian + hessian.T)
-    try:
-        covariance = np.linalg.inv(hessian)
-    except np.linalg.LinAlgError:
-        covariance = np.linalg.pinv(hessian)
-    covariance = 0.5 * (covariance + covariance.T)
-    eigenvalues, eigenvectors = np.linalg.eigh(covariance)
-    eigenvalues = np.clip(eigenvalues, 1.0e-10, None)
-    return eigenvectors @ np.diag(eigenvalues) @ eigenvectors.T
+
+    # The Hessian of the NLL at a genuine minimum is positive definite. A
+    # non-positive eigenvalue means the optimiser stopped at a saddle or on a
+    # bound, i.e. the fit did not converge. The previous code inverted the
+    # Hessian regardless and then clipped the resulting covariance eigenvalues
+    # up to +1e-10, which turned a failed fit into an *arbitrarily tight* error
+    # bar -- a failure that silently disguised itself as a precise measurement.
+    # Refuse instead.
+    hessian_eigenvalues = np.linalg.eigvalsh(hessian)
+    if np.any(hessian_eigenvalues <= 0.0):
+        raise NonPositiveDefiniteHessianError(
+            "The negative-log-likelihood Hessian at the reported optimum is not "
+            "positive definite (eigenvalues: "
+            f"{np.array2string(hessian_eigenvalues, precision=4)}). The optimiser "
+            "has not found an interior minimum, so asymptotic error bars are "
+            "meaningless here. Check the bounds and the starting points rather "
+            "than regularising the covariance."
+        )
+
+    covariance = np.linalg.inv(hessian)
+    return 0.5 * (covariance + covariance.T)
 
 
 def finite_difference_hessian(
@@ -1053,7 +1123,7 @@ def build_display_parameter_sample_table(
             raise ValueError(f"Unknown radial model: {spec.radial_model}")
 
         row["log10_N0"] = float(np.log10(model["total_initial_count"]))
-        row["survival_fraction"] = float(model["survival_fraction"])
+        row["selection_fraction"] = float(model["selection_fraction"])
         rows.append(row)
     return pd.DataFrame(rows)
 

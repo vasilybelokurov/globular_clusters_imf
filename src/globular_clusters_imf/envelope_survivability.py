@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
+from .mass_grid import DEFAULT_LOG_MASS_MAX, DEFAULT_LOG_MASS_MIN, DEFAULT_N_MASS_GRID
 
 
 @dataclass(frozen=True)
@@ -60,7 +61,7 @@ def build_envelope_survivability_grid(
     catalog: pd.DataFrame,
     *,
     n_radius_grid: int = 160,
-    n_mass_grid: int = 180,
+    n_mass_grid: int = DEFAULT_N_MASS_GRID,
     margin_dex: float = 1.0e-3,
 ) -> dict[str, object]:
     if "semi_major_axis_kpc" not in catalog or "log_initial_mass_msun" not in catalog:
@@ -72,8 +73,8 @@ def build_envelope_survivability_grid(
     hull_vertices = compute_lower_convex_hull(log_a_data, log_mass_data)
 
     log_a_grid = np.linspace(float(log_a_data.min()), float(log_a_data.max()), n_radius_grid)
-    log_mass_min = min(3.5, float(np.floor(log_mass_data.min() * 10.0) / 10.0))
-    log_mass_max = max(7.3, float(np.ceil(log_mass_data.max() * 10.0) / 10.0))
+    log_mass_min = DEFAULT_LOG_MASS_MIN
+    log_mass_max = DEFAULT_LOG_MASS_MAX
     log_mass_grid = np.linspace(log_mass_min, log_mass_max, n_mass_grid)
 
     boundary_log_mass = evaluate_piecewise_linear_boundary(

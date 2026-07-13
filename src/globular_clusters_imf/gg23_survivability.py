@@ -5,6 +5,7 @@ from dataclasses import asdict, dataclass, replace
 import numpy as np
 import pandas as pd
 
+from .mass_grid import DEFAULT_LOG_MASS_MAX, DEFAULT_LOG_MASS_MIN, DEFAULT_N_MASS_GRID
 from .model import AGE_GYR
 from .smooth_survivability import (
     fit_monotonic_soft_survivability_model,
@@ -300,7 +301,7 @@ def build_raw_gg23_survival_grid_from_catalog(
     *,
     eta_t: float = 1.0,
     n_radius_grid: int = 160,
-    n_mass_grid: int = 180,
+    n_mass_grid: int = DEFAULT_N_MASS_GRID,
     bandwidth_log10_a_dex: float = 0.18,
 ) -> dict[str, object]:
     working = catalog.copy()
@@ -322,8 +323,8 @@ def build_raw_gg23_survival_grid_from_catalog(
     log_a_data = np.log10(working["semi_major_axis_kpc"].to_numpy(dtype=float))
     log_cut_data = working["log_gg23_survival_mass_cut_msun"].to_numpy(dtype=float)
     log_a_grid = np.linspace(log_a_data.min(), log_a_data.max(), n_radius_grid)
-    log_mass_min = min(3.5, float(np.floor(working["log_initial_mass_msun"].min() * 10.0) / 10.0))
-    log_mass_max = max(7.3, float(np.ceil(working["log_initial_mass_msun"].max() * 10.0) / 10.0))
+    log_mass_min = DEFAULT_LOG_MASS_MIN
+    log_mass_max = DEFAULT_LOG_MASS_MAX
     log_mass_grid = np.linspace(log_mass_min, log_mass_max, n_mass_grid)
 
     weights = np.exp(
@@ -351,7 +352,7 @@ def build_gg23_survivability_grid(
     *,
     eta_t: float = 1.0,
     n_radius_grid: int = 160,
-    n_mass_grid: int = 180,
+    n_mass_grid: int = DEFAULT_N_MASS_GRID,
     bandwidth_log10_a_dex: float = 0.18,
     surface_model: str = "logistic",
 ) -> dict[str, object]:

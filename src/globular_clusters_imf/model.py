@@ -7,12 +7,46 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from scipy import optimize, stats
+from .mass_grid import DEFAULT_LOG_MASS_MAX, DEFAULT_LOG_MASS_MIN, DEFAULT_N_MASS_GRID
 
 AGE_GYR = 12.0
 AGE_MYR = AGE_GYR * 1_000.0
 MEAN_INITIAL_STELLAR_MASS_MSUN = 0.65
-MILKY_WAY_CIRCULAR_SPEED_KMS = 240.0
 LARGE_PENALTY = 1.0e30
+
+# Circular speed entering the dissolution-time scaling t_dis ~ (V_c / V_c,ref)^-1.
+#
+# This previously read `MILKY_WAY_CIRCULAR_SPEED_KMS = 240.0` divided by a *literal*
+# 240.0, so the factor was identically 1.0 for every cluster. The constant looked
+# like a physical, tunable input but was inert: changing it did nothing.
+#
+# Both ends of the ratio are now named, so the scaling is live and adjusting the
+# adopted circular speed actually propagates.
+#
+# The reference value is kept at 240.0 so that this refactor does NOT change any
+# fitted number. UNVERIFIED: the reference velocity of the underlying
+# Baumgardt & Makino (2003) calibration has not been checked against the paper,
+# and it may well be 220 km/s, in which case every dissolution time here is ~9 per
+# cent off and every survival cut moves with it. This needs to be confirmed
+# against the source before the next fit is published; it is deliberately left
+# behaviour-preserving rather than changed on a guess.
+MILKY_WAY_CIRCULAR_SPEED_KMS = 240.0
+DISSOLUTION_REFERENCE_CIRCULAR_SPEED_KMS = 240.0
+
+
+# The lognormal is a density in log10(M); the power law is naturally a density in
+# M. Their log-likelihoods therefore live in different base measures and differ by
+# the Jacobian sum(log(M ln10)) ~ 2337 nats for this catalogue -- a change of
+# variables, not evidence. They used to be written side by side into
+# model_summary.json, inviting exactly that mistake. Every model now reports its
+# log-likelihood per dex (density in log10 M) so the numbers are comparable, with
+# the native-measure value retained separately for reference.
+LOG_TEN = float(np.log(10.0))
+
+# Cap on Horvitz-Thompson inverse-probability weights 1/S. A cluster with S = 1e-3
+# already stands for a thousand destroyed siblings; anything beyond that is an
+# extrapolation the catalogue cannot support.
+MAX_INVERSE_PROBABILITY_WEIGHT = 1.0e3
 
 
 @dataclass
@@ -21,7 +55,9 @@ class LognormalFitResult:
     mu_log10_msun: float
     sigma_log10_msun: float
     selection_offset_dex: float
-    log_likelihood: float
+    log_likelihood_per_dex: float
+    log_likelihood_native_measure: float
+    base_measure: str
     n_clusters: int
 
 
@@ -32,7 +68,9 @@ class PowerLawFitResult:
     mass_min_msun: float
     mass_max_msun: float
     selection_offset_dex: float
-    log_likelihood: float
+    log_likelihood_per_dex: float
+    log_likelihood_native_measure: float
+    base_measure: str
     n_clusters: int
 
 
@@ -143,6 +181,7 @@ def total_dissolution_time_myr(
     eccentricity: float,
     mean_initial_stellar_mass_msun: float = MEAN_INITIAL_STELLAR_MASS_MSUN,
     circular_speed_kms: float = MILKY_WAY_CIRCULAR_SPEED_KMS,
+    reference_circular_speed_kms: float = DISSOLUTION_REFERENCE_CIRCULAR_SPEED_KMS,
 ) -> float:
     n_initial = initial_mass_msun / mean_initial_stellar_mass_msun
     coulomb_argument = np.log(0.02 * n_initial)
@@ -152,7 +191,7 @@ def total_dissolution_time_myr(
         1.35
         * np.power(initial_mass_msun / coulomb_argument, 0.75)
         * r_apo_kpc
-        * np.power(circular_speed_kms / 240.0, -1.0)
+        * np.power(circular_speed_kms / reference_circular_speed_kms, -1.0)
         * (1.0 - eccentricity)
     )
 
@@ -210,12 +249,16 @@ def fit_truncated_lognormal(catalog: pd.DataFrame) -> LognormalFitResult:
     mu_fit = float(result.x[0])
     sigma_fit = float(np.exp(result.x[1]))
     selection_offset_dex = float(result.x[2])
+    # This likelihood is already a density in log10(M), so per-dex and native agree.
+    log_likelihood = float(-result.fun)
     return LognormalFitResult(
         model_name="truncated_lognormal",
         mu_log10_msun=mu_fit,
         sigma_log10_msun=sigma_fit,
         selection_offset_dex=selection_offset_dex,
-        log_likelihood=float(-result.fun),
+        log_likelihood_per_dex=log_likelihood,
+        log_likelihood_native_measure=log_likelihood,
+        base_measure="log10_msun",
         n_clusters=len(catalog),
     )
 
@@ -246,13 +289,22 @@ def fit_truncated_powerlaw(
     minimum_offset = float(np.nanmin(np.log10(masses) - np.log10(cuts))) - 1.0e-3
     selection_offset_dex = min(minimum_offset, -0.2)
     result = optimize.minimize_scalar(negative_log_likelihood, bounds=(-4.5, 0.5), method="bounded")
+
+    # `negative_log_likelihood` is built from p(M) dM, a density in M. Converting to
+    # a density in log10(M) -- the base measure the lognormal uses -- multiplies each
+    # term by dM/dlog10(M) = M ln10, i.e. adds sum(log(M ln10)) to the log-likelihood.
+    # Without this the two families cannot be compared at all.
+    log_likelihood_native = float(-result.fun)
+    jacobian = float(np.sum(np.log(masses * LOG_TEN)))
     return PowerLawFitResult(
         model_name="truncated_powerlaw",
         beta=float(result.x),
         mass_min_msun=mass_min_msun,
         mass_max_msun=mass_max_msun,
         selection_offset_dex=selection_offset_dex,
-        log_likelihood=float(-result.fun),
+        log_likelihood_per_dex=log_likelihood_native + jacobian,
+        log_likelihood_native_measure=log_likelihood_native,
+        base_measure="msun",
         n_clusters=len(catalog),
     )
 
@@ -283,9 +335,17 @@ def estimate_radial_profile(
     catalog: pd.DataFrame,
     survival_probability_column: str,
     bins: tuple[float, ...] = (0.0, 3.0, 15.0, np.inf),
+    max_inverse_probability_weight: float = MAX_INVERSE_PROBABILITY_WEIGHT,
 ) -> pd.DataFrame:
     working = catalog.copy()
-    working["inverse_probability_weight"] = 1.0 / working[survival_probability_column]
+    # Horvitz-Thompson weights 1/S are unbounded. The survival probabilities are
+    # only clipped at 1e-9, so a single cluster sitting just above its survival
+    # threshold could contribute up to 1e9 to `estimated_initial_count` and
+    # dominate the entire bin. Cap the weight and report how often the cap binds,
+    # so a truncated estimate can never be mistaken for a converged one.
+    raw_weight = 1.0 / working[survival_probability_column]
+    working["inverse_probability_weight"] = np.minimum(raw_weight, max_inverse_probability_weight)
+    working["inverse_probability_weight_capped"] = raw_weight > max_inverse_probability_weight
     working["radial_bin"] = pd.cut(
         working["semi_major_axis_kpc"],
         bins=bins,
@@ -302,6 +362,10 @@ def estimate_radial_profile(
                 "radial_bin": str(radial_bin),
                 "n_observed_survivors": int(len(group)),
                 "estimated_initial_count": float(estimated_initial_count),
+                "n_weights_at_cap": int(group["inverse_probability_weight_capped"].sum()),
+                "max_inverse_probability_weight": float(
+                    group["inverse_probability_weight"].max()
+                ),
                 "estimated_destroyed_count": float(estimated_initial_count - len(group)),
                 "mean_survival_probability": float(group[survival_probability_column].mean()),
                 "median_survival_mass_cut_msun": float(group["survival_mass_cut_msun"].median()),
@@ -475,7 +539,7 @@ def estimate_survivability_map(
     catalog: pd.DataFrame,
     selection_offset_dex: float,
     n_radius_grid: int = 160,
-    n_mass_grid: int = 180,
+    n_mass_grid: int = DEFAULT_N_MASS_GRID,
     bandwidth_log10_a_dex: float = 0.18,
 ) -> dict[str, object]:
     working = catalog.copy()
@@ -483,8 +547,8 @@ def estimate_survivability_map(
     log_cut_data = working["log_survival_mass_cut_msun"].to_numpy() + selection_offset_dex
 
     log_a_grid = np.linspace(log_a_data.min(), log_a_data.max(), n_radius_grid)
-    log_mass_min = min(3.5, float(np.floor(working["log_initial_mass_msun"].min() * 10.0) / 10.0))
-    log_mass_max = max(7.3, float(np.ceil(working["log_initial_mass_msun"].max() * 10.0) / 10.0))
+    log_mass_min = DEFAULT_LOG_MASS_MIN
+    log_mass_max = DEFAULT_LOG_MASS_MAX
     log_mass_grid = np.linspace(log_mass_min, log_mass_max, n_mass_grid)
 
     weights = np.exp(

@@ -858,7 +858,7 @@ def plot_best_model_triangle(
     best_payload: dict[str, object],
     output_path: Path,
 ) -> None:
-    columns = [column for column in sample_table.columns if column != "survival_fraction"]
+    columns = [column for column in sample_table.columns if column != "selection_fraction"]
     samples = sample_table[columns]
     n_dim = len(columns)
     fig, axes = plt.subplots(n_dim, n_dim, figsize=(2.25 * n_dim, 2.25 * n_dim))

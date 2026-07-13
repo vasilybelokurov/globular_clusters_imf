@@ -623,18 +623,6 @@ def _within_bounds(theta: np.ndarray, bounds: np.ndarray) -> bool:
     return bool(np.all(theta >= bounds[:, 0]) and np.all(theta <= bounds[:, 1]))
 
 
-def _compute_rhat(chains: np.ndarray) -> float:
-    m, n = chains.shape
-    if m < 2 or n < 2:
-        return float("nan")
-    chain_means = np.mean(chains, axis=1)
-    chain_vars = np.var(chains, axis=1, ddof=1)
-    within = np.mean(chain_vars)
-    between = n * np.var(chain_means, ddof=1)
-    if within <= 0.0:
-        return float("nan")
-    var_hat = ((n - 1) / n) * within + between / n
-    return float(np.sqrt(var_hat / within))
 
 
 def _surface_payload_from_result(result: dict[str, object]) -> dict[str, np.ndarray]:
@@ -906,6 +894,9 @@ def _trace_plot(chain_table: pd.DataFrame, output_path: Path, burn_in: int) -> N
     fig.tight_layout()
     fig.savefig(output_path, dpi=220)
     plt.close(fig)
+
+
+from globular_clusters_imf.mcmc_diagnostics import compute_rhat as _compute_rhat
 
 
 def main() -> None:

@@ -165,7 +165,7 @@ def fit_mg_only_split_alpha_models(
             "log_likelihood": float(base_payload["summary"].log_likelihood),
             "bic": float(base_payload["summary"].bic),
             "total_initial_count": float(base_payload["summary"].total_initial_count),
-            "survival_fraction": float(base_payload["summary"].survival_fraction),
+            "survival_fraction": float(base_payload["summary"].selection_fraction),
             "imf_parameters": baseline_imf_parameters,
             "radial_parameters": json.loads(base_payload["summary"].radial_parameters_json),
         },

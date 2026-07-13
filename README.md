@@ -2,6 +2,26 @@
 
 Reconstruct the shape of the Milky Way globular-cluster initial mass function using Baumgardt globular-cluster catalogs, while allowing the radial normalization of the population to vary with Galactocentric distance.
 
+## What N0 is, and is not
+
+**`N0` is a count of clusters formed above a lower mass `M_min`, which is an assumption, not a measurement.** The data say nothing about clusters below the survival threshold, so any total cluster count — and any total initial stellar mass derived from it — is conditional on where you put that floor. Every `N0` this code produces carries its `n0_log_mass_min` alongside it; do not quote one without the other.
+
+Two knobs, both declared explicitly rather than left to a hard-coded grid edge:
+
+- `mass_grid.DEFAULT_LOG_MASS_MIN` (currently `2.0`) — the lower cluster-formation mass. The integration grid must extend below the lowest survival threshold in the catalogue (~10^2.6 Msun), or the selection integral is truncated inside its own support and `N0` becomes an artefact of the grid. `build_fixed_survival_grid` now refuses to do that silently.
+- `detectability_model` — the completeness *amplitude* is only weakly identified, and only through the saturation of the assumed logistic form, not through any real information about how many clusters were missed. Use `scan_n0_versus_assumed_mean_completeness` to see how much of `N0` is assumption; report it next to any quoted `N0`.
+
+## Tests
+
+```bash
+source .venv/bin/activate
+pip install -e '.[test]'
+python -m pytest tests/ -m "not slow"   # ~15 s
+python -m pytest tests/                 # includes the completeness scan (minutes)
+```
+
+The suite pins the things that previously went wrong silently: the integration domain must contain the survival-positive region; densities must integrate to 1 in the base measure they claim; the detectability iteration must reach a fixed point and never decrease its likelihood; and the fitter must recover known parameters from simulated data.
+
 ## Working idea
 
 Baumgardt et al. (2019) show that the surviving Milky Way globular-cluster sample is strongly radius dependent:

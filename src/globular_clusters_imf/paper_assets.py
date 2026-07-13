@@ -2044,7 +2044,7 @@ def plot_two_component_results_for_paper(
             zorder=3,
             label=(
                 f"{label}: $N_0={summary_row['total_initial_count']:.0f}$, "
-                f"$f_{{\\rm sel}}={summary_row['survival_fraction']:.3f}$"
+                f"$f_{{\\rm sel}}={summary_row['selection_fraction']:.3f}$"
             ),
         )
     axes[1].set_xscale("log")
@@ -2307,7 +2307,7 @@ def build_key_results_table(
             "alpha_dndm": json.loads(best_single["imf_parameters_json"]).get("alpha_dndm"),
             "log10_m_c_msun": json.loads(best_single["imf_parameters_json"]).get("log10_m_c_msun"),
             "total_initial_count": float(best_single["total_initial_count"]),
-            "survival_fraction": float(best_single["survival_fraction"]),
+            "selection_fraction": float(best_single["selection_fraction"]),
             "total_initial_stellar_mass_msun": float(single_total_mass),
         },
         {
@@ -2318,7 +2318,7 @@ def build_key_results_table(
             "alpha_dndm": json.loads(detectability_summary.imf_parameters_json).get("alpha_dndm"),
             "log10_m_c_msun": json.loads(detectability_summary.imf_parameters_json).get("log10_m_c_msun"),
             "total_initial_count": float(detectability_model["total_initial_count"]),
-            "survival_fraction": float(detectability_model["selection_fraction"]),
+            "selection_fraction": float(detectability_model["selection_fraction"]),
             "total_initial_stellar_mass_msun": float(detectability_total_mass),
         },
         {
@@ -2329,7 +2329,7 @@ def build_key_results_table(
             "alpha_dndm": shared_imf.get("alpha_dndm"),
             "log10_m_c_msun": shared_imf.get("log10_m_c_msun"),
             "total_initial_count": float(shared_components.loc["in_situ", "total_initial_count"]),
-            "survival_fraction": float(shared_components.loc["in_situ", "survival_fraction"]),
+            "selection_fraction": float(shared_components.loc["in_situ", "survival_fraction"]),
             "total_initial_stellar_mass_msun": float(shared_component_masses["in_situ"]),
         },
         {
@@ -2340,7 +2340,7 @@ def build_key_results_table(
             "alpha_dndm": shared_imf.get("alpha_dndm"),
             "log10_m_c_msun": shared_imf.get("log10_m_c_msun"),
             "total_initial_count": float(shared_components.loc["accreted", "total_initial_count"]),
-            "survival_fraction": float(shared_components.loc["accreted", "survival_fraction"]),
+            "selection_fraction": float(shared_components.loc["accreted", "survival_fraction"]),
             "total_initial_stellar_mass_msun": float(shared_component_masses["accreted"]),
         },
         {
@@ -2351,7 +2351,7 @@ def build_key_results_table(
             "alpha_dndm": split_alpha_in_situ_imf.get("alpha_dndm"),
             "log10_m_c_msun": split_alpha_in_situ_imf.get("log10_m_c_msun"),
             "total_initial_count": float(split_alpha_components.loc["in_situ", "total_initial_count"]),
-            "survival_fraction": float(split_alpha_components.loc["in_situ", "survival_fraction"]),
+            "selection_fraction": float(split_alpha_components.loc["in_situ", "survival_fraction"]),
             "total_initial_stellar_mass_msun": float(split_alpha_component_masses["in_situ"]),
         },
         {
@@ -2362,7 +2362,7 @@ def build_key_results_table(
             "alpha_dndm": split_alpha_accreted_imf.get("alpha_dndm"),
             "log10_m_c_msun": split_alpha_accreted_imf.get("log10_m_c_msun"),
             "total_initial_count": float(split_alpha_components.loc["accreted", "total_initial_count"]),
-            "survival_fraction": float(split_alpha_components.loc["accreted", "survival_fraction"]),
+            "selection_fraction": float(split_alpha_components.loc["accreted", "survival_fraction"]),
             "total_initial_stellar_mass_msun": float(split_alpha_component_masses["accreted"]),
         },
     ]
@@ -2398,7 +2398,7 @@ def build_paper_summary_payload(
             "log_likelihood": float(best_single["log_likelihood"]),
             "total_initial_count": float(best_single["total_initial_count"]),
             "total_initial_stellar_mass_msun": float(single_total_mass),
-            "survival_fraction": float(best_single["survival_fraction"]),
+            "selection_fraction": float(best_single["selection_fraction"]),
             "imf_parameters": json.loads(best_single["imf_parameters_json"]),
         },
         "detectability_corrected_single_component_model": {
@@ -2433,8 +2433,8 @@ def build_paper_summary_payload(
             "in_situ_total_initial_stellar_mass_msun": float(shared_component_masses["in_situ"]),
             "accreted_total_initial_count": float(best_shared_components.loc["accreted", "total_initial_count"]),
             "accreted_total_initial_stellar_mass_msun": float(shared_component_masses["accreted"]),
-            "in_situ_survival_fraction": float(best_shared_components.loc["in_situ", "survival_fraction"]),
-            "accreted_survival_fraction": float(best_shared_components.loc["accreted", "survival_fraction"]),
+            "in_situ_selection_fraction": float(best_shared_components.loc["in_situ", "selection_fraction"]),
+            "accreted_selection_fraction": float(best_shared_components.loc["accreted", "selection_fraction"]),
             "mean_detectability": float(best_shared["mean_detectability"]),
             "shared_imf_parameters": json.loads(best_shared["shared_imf_parameters_json"]),
         },
@@ -2545,7 +2545,7 @@ def write_key_results_table_tex(table: pd.DataFrame, output_path: Path) -> None:
         mc_value = "..." if pd.isna(row.log10_m_c_msun) else f"{row.log10_m_c_msun:.3f}"
         lines.append(
             f"{row.model} & {pretty_component_label(row.component)} & {row.imf_family} & {row.radial_model} & "
-            f"{alpha_value} & {mc_value} & {row.total_initial_count:.1f} & {row.survival_fraction:.3f} & "
+            f"{alpha_value} & {mc_value} & {row.total_initial_count:.1f} & {row.selection_fraction:.3f} & "
             f"{row.total_initial_stellar_mass_msun / 1.0e8:.3f} \\\\"
         )
     lines.extend([r"\hline", r"\end{tabular}}", r"\end{table*}"])

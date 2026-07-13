@@ -9,6 +9,7 @@ import pandas as pd
 from scipy import optimize, special
 
 from .detectability_model import (
+    assert_em_converged,
     PresentMassProxyModel,
     aggregate_two_component_selection_stats,
     apply_effective_completeness_to_component_contexts,
@@ -234,6 +235,7 @@ def fit_single_component_detectability_em_with_abs_longitude(
     project_root: Path,
     spec: JointModelSpec | None = None,
     n_iterations: int = 12,
+    raise_on_non_convergence: bool = True,
     relaxation: float = 0.7,
     n_present_mass_bins: int = 6,
     n_distance_bins: int = 6,
@@ -366,7 +368,10 @@ def fit_single_component_detectability_em_with_abs_longitude(
             start_params=current_raw_params,
         )
         target_raw_params = completeness_fit["raw_parameters"]
-        current_raw_params = (1.0 - relaxation) * current_raw_params + relaxation * target_raw_params
+        previous_raw_params = np.asarray(current_raw_params, dtype=float)
+        current_raw_params = (1.0 - relaxation) * previous_raw_params + relaxation * target_raw_params
+        # Undamped fixed-point residual; see assert_em_converged.
+        em_parameter_residual = float(np.max(np.abs(target_raw_params - previous_raw_params)))
         updated_completeness_bin_grid = evaluate_completeness_bin_grid_with_abs_longitude(
             current_raw_params,
             observable_context,
@@ -404,6 +409,12 @@ def fit_single_component_detectability_em_with_abs_longitude(
             )
         )
 
+    em_converged = assert_em_converged(
+        parameter_residual=em_parameter_residual,
+        n_iterations_run=iteration,
+        label="fit_single_component_detectability_em_with_abs_longitude",
+        raise_on_non_convergence=raise_on_non_convergence,
+    )
     final_completeness_bin_grid = evaluate_completeness_bin_grid_with_abs_longitude(
         current_raw_params,
         observable_context,
@@ -911,6 +922,7 @@ def fit_shared_imf_two_component_detectability_em_single_model_with_abs_longitud
     component_base_contexts: dict[str, JointLikelihoodContext],
     spec: SharedImfTwoComponentSpec,
     n_iterations: int = 12,
+    raise_on_non_convergence: bool = True,
     relaxation: float = 0.7,
     fixed_effective_completeness_grid: np.ndarray | None = None,
     fixed_completeness_bin_grid: np.ndarray | None = None,
@@ -996,7 +1008,10 @@ def fit_shared_imf_two_component_detectability_em_single_model_with_abs_longitud
             start_params=current_raw_params,
         )
         target_raw_params = completeness_fit["raw_parameters"]
-        current_raw_params = (1.0 - relaxation) * current_raw_params + relaxation * target_raw_params
+        previous_raw_params = np.asarray(current_raw_params, dtype=float)
+        current_raw_params = (1.0 - relaxation) * previous_raw_params + relaxation * target_raw_params
+        # Undamped fixed-point residual; see assert_em_converged.
+        em_parameter_residual = float(np.max(np.abs(target_raw_params - previous_raw_params)))
         updated_completeness_bin_grid = evaluate_completeness_bin_grid_with_abs_longitude(
             current_raw_params,
             observable_context,
@@ -1026,6 +1041,12 @@ def fit_shared_imf_two_component_detectability_em_single_model_with_abs_longitud
             )
         )
 
+    em_converged = assert_em_converged(
+        parameter_residual=em_parameter_residual,
+        n_iterations_run=iteration,
+        label="fit_shared_imf_two_component_detectability_em_single_model_with_abs_longitude",
+        raise_on_non_convergence=raise_on_non_convergence,
+    )
     final_completeness_bin_grid = evaluate_completeness_bin_grid_with_abs_longitude(current_raw_params, observable_context)
     final_effective_completeness_grid = compute_effective_completeness_grid_with_abs_longitude(
         observable_context=observable_context,
@@ -1267,6 +1288,7 @@ def fit_split_alpha_two_component_detectability_em_single_model_with_abs_longitu
     component_base_contexts: dict[str, JointLikelihoodContext],
     spec: SplitAlphaTwoComponentSpec,
     n_iterations: int = 12,
+    raise_on_non_convergence: bool = True,
     relaxation: float = 0.7,
     fixed_effective_completeness_grid: np.ndarray | None = None,
     fixed_completeness_bin_grid: np.ndarray | None = None,
@@ -1353,7 +1375,10 @@ def fit_split_alpha_two_component_detectability_em_single_model_with_abs_longitu
             start_params=current_raw_params,
         )
         target_raw_params = completeness_fit["raw_parameters"]
-        current_raw_params = (1.0 - relaxation) * current_raw_params + relaxation * target_raw_params
+        previous_raw_params = np.asarray(current_raw_params, dtype=float)
+        current_raw_params = (1.0 - relaxation) * previous_raw_params + relaxation * target_raw_params
+        # Undamped fixed-point residual; see assert_em_converged.
+        em_parameter_residual = float(np.max(np.abs(target_raw_params - previous_raw_params)))
         updated_completeness_bin_grid = evaluate_completeness_bin_grid_with_abs_longitude(
             current_raw_params,
             observable_context,
@@ -1383,6 +1408,12 @@ def fit_split_alpha_two_component_detectability_em_single_model_with_abs_longitu
             )
         )
 
+    em_converged = assert_em_converged(
+        parameter_residual=em_parameter_residual,
+        n_iterations_run=iteration,
+        label="fit_split_alpha_two_component_detectability_em_single_model_with_abs_longitude",
+        raise_on_non_convergence=raise_on_non_convergence,
+    )
     final_completeness_bin_grid = evaluate_completeness_bin_grid_with_abs_longitude(current_raw_params, observable_context)
     final_effective_completeness_grid = compute_effective_completeness_grid_with_abs_longitude(
         observable_context=observable_context,
@@ -1642,6 +1673,7 @@ def fit_separate_imf_two_component_detectability_em_single_model_with_abs_longit
     in_situ_spec: JointModelSpec,
     accreted_spec: JointModelSpec,
     n_iterations: int = 12,
+    raise_on_non_convergence: bool = True,
     relaxation: float = 0.7,
     **_: object,
 ) -> dict[str, object]:
@@ -1707,7 +1739,10 @@ def fit_separate_imf_two_component_detectability_em_single_model_with_abs_longit
             start_params=current_raw_params,
         )
         target_raw_params = completeness_fit["raw_parameters"]
-        current_raw_params = (1.0 - relaxation) * current_raw_params + relaxation * target_raw_params
+        previous_raw_params = np.asarray(current_raw_params, dtype=float)
+        current_raw_params = (1.0 - relaxation) * previous_raw_params + relaxation * target_raw_params
+        # Undamped fixed-point residual; see assert_em_converged.
+        em_parameter_residual = float(np.max(np.abs(target_raw_params - previous_raw_params)))
         updated_completeness_bin_grid = evaluate_completeness_bin_grid_with_abs_longitude(
             current_raw_params,
             observable_context,
@@ -1743,6 +1778,12 @@ def fit_separate_imf_two_component_detectability_em_single_model_with_abs_longit
             )
         )
 
+    em_converged = assert_em_converged(
+        parameter_residual=em_parameter_residual,
+        n_iterations_run=iteration,
+        label="fit_separate_imf_two_component_detectability_em_single_model_with_abs_longitude",
+        raise_on_non_convergence=raise_on_non_convergence,
+    )
     final_completeness_bin_grid = evaluate_completeness_bin_grid_with_abs_longitude(current_raw_params, observable_context)
     final_effective_completeness_grid = compute_effective_completeness_grid_with_abs_longitude(
         observable_context=observable_context,

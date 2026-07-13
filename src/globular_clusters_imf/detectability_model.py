@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import warnings
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -75,6 +77,94 @@ class ObservablePredictionContext:
     n_geometry_samples: int
 
 
+# --- How well is the completeness amplitude actually identified? ---------------
+#
+# The total initial count is set by N0 = N_obs / selection_fraction, so the model
+# reproduces the observed number of clusters for *any* overall completeness level.
+# If the completeness could be rescaled freely, C -> k*C, then selection_fraction
+# -> k*sel, N0 -> N0/k and the predicted counts -> /k, leaving the Poisson
+# likelihood of the observable histogram exactly unchanged. The amplitude would
+# then carry no information whatsoever.
+#
+# It is *not* quite that bad, and it is worth being precise about why. C is
+# expit(intercept + shape), and raising the intercept saturates C towards 1, which
+# compresses its bin-to-bin contrast (for shape logits spanning [-2, 2], the
+# max/min ratio of C falls from 27.8 to 1.1 as the intercept goes from -2 to +4).
+# Amplitude and shape are therefore tied together by the logistic link, and the
+# observed bin-to-bin contrast does pin the intercept.
+#
+# The consequence is that N0 IS identified -- but only through the assumed
+# logistic functional form, not through any real information about how many
+# clusters were missed. A different link function with different saturation
+# behaviour would give a different N0 from the same data. This is a weak,
+# model-driven identification and it should be reported as such.
+#
+# `assumed_mean_completeness` exists to make that explicit: set it, and the
+# intercept is solved so the count-weighted mean completeness hits the declared
+# value, leaving only the shape slopes free. Scanning it (see
+# `scan_n0_versus_assumed_mean_completeness`) maps out how much of N0 is
+# assumption rather than measurement. Default None = let the logistic form decide,
+# which is the historical behaviour.
+#
+# A note on a fix that does NOT work, in case it looks tempting: anchoring the
+# *maximum-bin* completeness to ~1 instead. That reintroduces a runaway, because
+# the optimiser can then scale all the slopes up together, which pushes the solved
+# intercept down and drives the mean completeness (and hence 1/N0) to zero. The
+# degeneracy moves rather than disappearing. Measured: mean completeness fell
+# 0.835 -> 0.073 and N0 rose 729 -> 3350 over 60 iterations without converging.
+DEFAULT_ASSUMED_MEAN_COMPLETENESS: float | None = None
+
+
+class DetectabilityConvergenceError(RuntimeError):
+    """Raised when the detectability iteration fails to reach a fixed point."""
+
+
+DEFAULT_EM_TOLERANCE = 1.0e-4
+
+
+def assert_em_converged(
+    parameter_residual: float,
+    n_iterations_run: int,
+    label: str,
+    tolerance: float = DEFAULT_EM_TOLERANCE,
+    raise_on_non_convergence: bool = True,
+) -> bool:
+    """Fail loudly when a detectability iteration stopped without converging.
+
+    Running a fixed number of steps and publishing whatever came out is how an
+    actively diverging iterate ended up in the tables. Every iteration in this
+    module now has to say whether it reached a fixed point.
+
+    The residual is measured on the *undamped* target step, not the damped one:
+    relaxation shrinks the step by construction, so a damped residual would make
+    any slow runaway look converged.
+    """
+    if parameter_residual < tolerance:
+        return True
+    message = (
+        f"{label}: detectability iteration did NOT converge after {n_iterations_run} "
+        f"steps (fixed-point residual {parameter_residual:.3e} > tolerance "
+        f"{tolerance:.1e}). Whatever N0 this produced is the last iterate, not a "
+        "solution, and must not be published. Raise the iteration cap or "
+        "investigate the identifiability of the completeness amplitude."
+    )
+    if raise_on_non_convergence:
+        raise DetectabilityConvergenceError(message)
+    warnings.warn(message, RuntimeWarning, stacklevel=2)
+    return False
+
+
+@dataclass
+class DetectabilityConvergence:
+    converged: bool
+    n_iterations_run: int
+    parameter_residual: float
+    log_likelihood_residual: float
+    log_likelihood_monotone: bool
+    tolerance: float
+    message: str
+
+
 @dataclass
 class DetectabilityIterationSummary:
     iteration: int
@@ -89,6 +179,8 @@ class DetectabilityIterationSummary:
     completeness_latitude_slope: float
     predicted_complete_survivor_count: float
     predicted_observed_count: float
+    parameter_residual: float
+    log_likelihood_residual: float
 
 
 def fit_detectability_corrected_single_component_models(
@@ -148,7 +240,11 @@ def fit_single_component_detectability_em(
     catalog: pd.DataFrame,
     project_root: Path,
     spec: JointModelSpec | None = None,
-    n_iterations: int = 6,
+    max_iterations: int = 200,
+    tolerance: float = 1.0e-4,
+    raise_on_non_convergence: bool = True,
+    log_likelihood_monotonicity_atol: float = 1.0e-6,
+    assumed_mean_completeness: float | None = DEFAULT_ASSUMED_MEAN_COMPLETENESS,
     relaxation: float = 0.7,
     n_present_mass_bins: int = 6,
     n_distance_bins: int = 6,
@@ -156,7 +252,25 @@ def fit_single_component_detectability_em(
     n_geometry_samples: int = 5000,
     sun_galactocentric_radius_kpc: float = 8.2,
     survival_grid_override: dict[str, object] | None = None,
+    n_iterations: int | None = None,
 ) -> dict[str, object]:
+    """Iterate the joint population fit against the detectability model.
+
+    This used to run a fixed `n_iterations=6` with no convergence test, which is
+    how an unconverged (indeed diverging) iterate ended up being published. It now
+    iterates to a fixed point and raises if it cannot reach one.
+
+    `assumed_mean_completeness`, if set, declares the mean completeness instead of
+    letting the logistic form imply it; see the note at the top of this module for
+    why that identification is weak.
+    """
+    if n_iterations is not None:
+        raise TypeError(
+            "`n_iterations` is gone: running the detectability iteration for a "
+            "fixed number of steps and reporting whatever came out is exactly the "
+            "bug this replaced. Use `max_iterations` (a safety stop) together with "
+            "`tolerance` (the actual convergence criterion)."
+        )
     if spec is None:
         spec = JointModelSpec(imf_family="schechter", radial_model="logpoly3")
 
@@ -207,6 +321,7 @@ def fit_single_component_detectability_em(
             observable_context=observable_context,
         ),
         start_params=None,
+        assumed_mean_completeness=assumed_mean_completeness,
     )["raw_parameters"]
 
     iteration_rows: list[DetectabilityIterationSummary] = []
@@ -214,7 +329,14 @@ def fit_single_component_detectability_em(
     current_payload = baseline_payload
     current_effective_completeness_grid = np.ones_like(base_context.survival_probability_grid)
 
-    for iteration in range(1, n_iterations + 1):
+    parameter_residual = np.inf
+    log_likelihood_residual = np.inf
+    previous_log_likelihood: float | None = None
+    log_likelihood_monotone = True
+    converged = False
+    iteration = 0
+
+    for iteration in range(1, max_iterations + 1):
         completeness_bin_grid = evaluate_completeness_bin_grid(current_raw_params, observable_context)
         current_effective_completeness_grid = compute_effective_completeness_grid(
             observable_context=observable_context,
@@ -241,15 +363,33 @@ def fit_single_component_detectability_em(
             observable_context=observable_context,
             predicted_complete_counts=predicted_complete_counts,
             start_params=current_raw_params,
+            assumed_mean_completeness=assumed_mean_completeness,
         )
         target_raw_params = completeness_fit["raw_parameters"]
-        current_raw_params = (1.0 - relaxation) * current_raw_params + relaxation * target_raw_params
+
+        previous_raw_params = np.asarray(current_raw_params, dtype=float)
+        current_raw_params = (1.0 - relaxation) * previous_raw_params + relaxation * target_raw_params
+
+        # Fixed-point residual: how far the *undamped* update still wants to move.
+        # Damping shrinks the step, so measuring the damped step would make any
+        # slow-moving runaway look converged. Measure the target instead.
+        parameter_residual = float(np.max(np.abs(target_raw_params - previous_raw_params)))
+
+        current_log_likelihood = float(current_payload["summary"].log_likelihood)
+        if previous_log_likelihood is None:
+            log_likelihood_residual = np.inf
+        else:
+            log_likelihood_residual = float(abs(current_log_likelihood - previous_log_likelihood))
+            if current_log_likelihood < previous_log_likelihood - log_likelihood_monotonicity_atol:
+                log_likelihood_monotone = False
+        previous_log_likelihood = current_log_likelihood
+
         updated_completeness_bin_grid = evaluate_completeness_bin_grid(current_raw_params, observable_context)
         predicted_observed_counts = predicted_complete_counts * updated_completeness_bin_grid
         iteration_rows.append(
             DetectabilityIterationSummary(
                 iteration=iteration,
-                log_likelihood=float(current_payload["summary"].log_likelihood),
+                log_likelihood=current_log_likelihood,
                 total_initial_count=float(current_payload["model"]["total_initial_count"]),
                 selection_fraction=float(current_payload["model"]["selection_fraction"]),
                 raw_survival_fraction=float(current_payload["model"]["raw_survival_fraction"]),
@@ -263,8 +403,43 @@ def fit_single_component_detectability_em(
                 completeness_latitude_slope=float(np.exp(current_raw_params[3])),
                 predicted_complete_survivor_count=float(np.sum(predicted_complete_counts)),
                 predicted_observed_count=float(np.sum(predicted_observed_counts)),
+                parameter_residual=parameter_residual,
+                log_likelihood_residual=log_likelihood_residual,
             )
         )
+
+        if parameter_residual < tolerance and log_likelihood_residual < tolerance:
+            converged = True
+            break
+
+    if not converged:
+        message = (
+            f"Detectability iteration did NOT converge in {iteration} steps: "
+            f"fixed-point residual {parameter_residual:.3e} > tol {tolerance:.1e}. "
+            "The reported N0 is whatever the last iterate happened to be, not a "
+            "solution. Do not publish it."
+        )
+        if not log_likelihood_monotone:
+            message += (
+                " The log-likelihood also decreased along the way, which indicates "
+                "the iteration is sliding along an unidentified direction rather "
+                "than maximising anything."
+            )
+        if raise_on_non_convergence:
+            raise DetectabilityConvergenceError(message)
+        warnings.warn(message, RuntimeWarning, stacklevel=2)
+    else:
+        message = f"Converged in {iteration} iterations (residual {parameter_residual:.3e})."
+
+    convergence = DetectabilityConvergence(
+        converged=converged,
+        n_iterations_run=iteration,
+        parameter_residual=float(parameter_residual),
+        log_likelihood_residual=float(log_likelihood_residual),
+        log_likelihood_monotone=bool(log_likelihood_monotone),
+        tolerance=float(tolerance),
+        message=message,
+    )
 
     final_completeness_bin_grid = evaluate_completeness_bin_grid(current_raw_params, observable_context)
     final_effective_completeness_grid = compute_effective_completeness_grid(
@@ -328,7 +503,10 @@ def fit_single_component_detectability_em(
         "spec": asdict(spec),
         "selection_offset_dex": selection_offset_dex,
         "sun_galactocentric_radius_kpc": sun_galactocentric_radius_kpc,
-        "n_iterations": n_iterations,
+        "max_iterations": max_iterations,
+        "tolerance": tolerance,
+        "assumed_mean_completeness": assumed_mean_completeness,
+        "convergence": asdict(convergence),
         "relaxation": relaxation,
         "baseline_total_initial_count": float(baseline_payload["model"]["total_initial_count"]),
         "baseline_raw_survival_fraction": float(baseline_payload["model"]["raw_survival_fraction"]),
@@ -370,6 +548,7 @@ def fit_single_component_detectability_em(
 
     return {
         "spec": spec,
+        "convergence": convergence,
         "selection_offset_dex": selection_offset_dex,
         "base_context": base_context,
         "final_context": final_context,
@@ -388,6 +567,53 @@ def fit_single_component_detectability_em(
         "final_complete_survivor_intensity_grid": final_complete_survivor_intensity_grid,
         "summary_payload": summary_payload,
     }
+
+
+def scan_n0_versus_assumed_mean_completeness(
+    catalog: pd.DataFrame,
+    project_root: Path,
+    assumed_mean_completeness_values: Sequence[float],
+    spec: JointModelSpec | None = None,
+    **em_kwargs: object,
+) -> pd.DataFrame:
+    """How much of N0 is assumption rather than measurement?
+
+    Refits the whole detectability iteration at each declared mean completeness and
+    reports the resulting N0. Because N0 = N_obs / (survival x completeness), a
+    scan that comes back proportional to 1/completeness is telling you that the
+    completeness amplitude -- not the data -- is setting the answer.
+
+    This belongs in the paper next to any quoted N0.
+    """
+    if spec is None:
+        spec = JointModelSpec(imf_family="schechter", radial_model="logpoly3")
+
+    rows: list[dict[str, object]] = []
+    for assumed in assumed_mean_completeness_values:
+        result = fit_single_component_detectability_em(
+            catalog,
+            project_root,
+            spec=spec,
+            assumed_mean_completeness=float(assumed),
+            **em_kwargs,
+        )
+        payload = result["summary_payload"]
+        convergence = result["convergence"]
+        history = result["iteration_history_table"]
+        rows.append(
+            {
+                "assumed_mean_completeness": float(assumed),
+                "achieved_mean_completeness": float(history["completeness_mean"].iloc[-1]),
+                "total_initial_count": float(payload["final_total_initial_count"]),
+                "selection_fraction": float(payload["final_selection_fraction"]),
+                "raw_survival_fraction": float(payload["final_raw_survival_fraction"]),
+                "log_likelihood": float(history["log_likelihood"].iloc[-1]),
+                "n0_log_mass_min": float(result["final_payload"]["model"]["n0_log_mass_min"]),
+                "converged": bool(convergence.converged),
+                "n_iterations_run": int(convergence.n_iterations_run),
+            }
+        )
+    return pd.DataFrame(rows)
 
 
 def fit_shared_imf_two_component_detectability_em_models(
@@ -735,6 +961,7 @@ def fit_shared_imf_two_component_detectability_em_single_model(
     component_base_contexts: dict[str, JointLikelihoodContext],
     spec: SharedImfTwoComponentSpec,
     n_iterations: int = 6,
+    raise_on_non_convergence: bool = True,
     relaxation: float = 0.7,
     **_: object,
 ) -> dict[str, object]:
@@ -750,6 +977,7 @@ def fit_shared_imf_two_component_detectability_em_single_model(
             observable_context=observable_context,
         ),
         start_params=None,
+        assumed_mean_completeness=assumed_mean_completeness,
     )["raw_parameters"]
 
     iteration_rows: list[DetectabilityIterationSummary] = []
@@ -781,7 +1009,10 @@ def fit_shared_imf_two_component_detectability_em_single_model(
             start_params=current_raw_params,
         )
         target_raw_params = completeness_fit["raw_parameters"]
-        current_raw_params = (1.0 - relaxation) * current_raw_params + relaxation * target_raw_params
+        previous_raw_params = np.asarray(current_raw_params, dtype=float)
+        current_raw_params = (1.0 - relaxation) * previous_raw_params + relaxation * target_raw_params
+        # Undamped fixed-point residual; see assert_em_converged.
+        em_parameter_residual = float(np.max(np.abs(target_raw_params - previous_raw_params)))
         updated_completeness_bin_grid = evaluate_completeness_bin_grid(current_raw_params, observable_context)
         predicted_observed_counts = predicted_complete_counts * updated_completeness_bin_grid
         selection_stats = aggregate_two_component_selection_stats(
@@ -810,6 +1041,12 @@ def fit_shared_imf_two_component_detectability_em_single_model(
             )
         )
 
+    em_converged = assert_em_converged(
+        parameter_residual=em_parameter_residual,
+        n_iterations_run=iteration,
+        label="fit_shared_imf_two_component_detectability_em_single_model",
+        raise_on_non_convergence=raise_on_non_convergence,
+    )
     final_completeness_bin_grid = evaluate_completeness_bin_grid(current_raw_params, observable_context)
     final_effective_completeness_grid = compute_effective_completeness_grid(
         observable_context=observable_context,
@@ -910,6 +1147,7 @@ def fit_separate_imf_two_component_detectability_em_single_model(
     in_situ_spec: JointModelSpec,
     accreted_spec: JointModelSpec,
     n_iterations: int = 6,
+    raise_on_non_convergence: bool = True,
     relaxation: float = 0.7,
     **_: object,
 ) -> dict[str, object]:
@@ -934,6 +1172,7 @@ def fit_separate_imf_two_component_detectability_em_single_model(
             observable_context=observable_context,
         ),
         start_params=None,
+        assumed_mean_completeness=assumed_mean_completeness,
     )["raw_parameters"]
 
     iteration_rows: list[DetectabilityIterationSummary] = []
@@ -975,7 +1214,10 @@ def fit_separate_imf_two_component_detectability_em_single_model(
             start_params=current_raw_params,
         )
         target_raw_params = completeness_fit["raw_parameters"]
-        current_raw_params = (1.0 - relaxation) * current_raw_params + relaxation * target_raw_params
+        previous_raw_params = np.asarray(current_raw_params, dtype=float)
+        current_raw_params = (1.0 - relaxation) * previous_raw_params + relaxation * target_raw_params
+        # Undamped fixed-point residual; see assert_em_converged.
+        em_parameter_residual = float(np.max(np.abs(target_raw_params - previous_raw_params)))
         updated_completeness_bin_grid = evaluate_completeness_bin_grid(current_raw_params, observable_context)
         predicted_observed_counts = predicted_complete_counts * updated_completeness_bin_grid
         selection_stats = aggregate_two_component_selection_stats(
@@ -1013,6 +1255,12 @@ def fit_separate_imf_two_component_detectability_em_single_model(
             )
         )
 
+    em_converged = assert_em_converged(
+        parameter_residual=em_parameter_residual,
+        n_iterations_run=iteration,
+        label="fit_separate_imf_two_component_detectability_em_single_model",
+        raise_on_non_convergence=raise_on_non_convergence,
+    )
     final_completeness_bin_grid = evaluate_completeness_bin_grid(current_raw_params, observable_context)
     final_effective_completeness_grid = compute_effective_completeness_grid(
         observable_context=observable_context,
@@ -1555,6 +1803,7 @@ def fit_logistic_completeness_model(
     observable_context: ObservablePredictionContext,
     predicted_complete_counts: np.ndarray,
     start_params: np.ndarray | None,
+    assumed_mean_completeness: float | None = DEFAULT_ASSUMED_MEAN_COMPLETENESS,
 ) -> dict[str, object]:
     total_predicted = float(np.sum(predicted_complete_counts))
     total_observed = float(np.sum(observable_context.observed_counts))
@@ -1573,6 +1822,13 @@ def fit_logistic_completeness_model(
     starts.append(np.array([default_start[0], np.log(0.6), np.log(0.6), np.log(0.6)]))
     bounds = [(-8.0, 8.0), (-8.0, 4.0), (-8.0, 4.0), (-8.0, 4.0)]
 
+    # When the mean completeness is anchored the intercept is a solved function of
+    # the slopes, so leaving it free would add a redundant direction to the
+    # optimiser. Freeze the slot; `anchored_completeness_params` fills it in.
+    if assumed_mean_completeness is not None:
+        bounds = [(0.0, 0.0), *bounds[1:]]
+        starts = [np.array([0.0, *np.asarray(start, dtype=float)[1:]]) for start in starts]
+
     best_result = None
     best_value = np.inf
     for start in starts:
@@ -1581,6 +1837,7 @@ def fit_logistic_completeness_model(
                 params=params,
                 observable_context=observable_context,
                 predicted_complete_counts=predicted_complete_counts,
+                assumed_mean_completeness=assumed_mean_completeness,
             ),
             x0=np.asarray(start, dtype=float),
             method="L-BFGS-B",
@@ -1592,9 +1849,12 @@ def fit_logistic_completeness_model(
 
     if best_result is None:
         raise RuntimeError("Completeness optimization failed to start.")
-    completeness_bin_grid = evaluate_completeness_bin_grid(best_result.x, observable_context)
+    resolved_params = anchored_completeness_params(
+        best_result.x, observable_context, predicted_complete_counts, assumed_mean_completeness
+    )
+    completeness_bin_grid = evaluate_completeness_bin_grid(resolved_params, observable_context)
     return {
-        "raw_parameters": np.asarray(best_result.x, dtype=float),
+        "raw_parameters": resolved_params,
         "completeness_bin_grid": completeness_bin_grid,
         "negative_log_likelihood": float(best_result.fun),
         "success": bool(best_result.success),
@@ -1602,22 +1862,52 @@ def fit_logistic_completeness_model(
     }
 
 
+def anchored_completeness_params(
+    params: np.ndarray,
+    observable_context: ObservablePredictionContext,
+    predicted_complete_counts: np.ndarray,
+    assumed_mean_completeness: float | None,
+) -> np.ndarray:
+    """Return params with the intercept solved for, if the mean is being anchored."""
+    params = np.asarray(params, dtype=float)
+    if assumed_mean_completeness is None:
+        return params
+    anchored = params.copy()
+    anchored[0] = solve_intercept_for_mean_completeness(
+        raw_params=params,
+        observable_context=observable_context,
+        weights=predicted_complete_counts,
+        assumed_mean_completeness=assumed_mean_completeness,
+    )
+    return anchored
+
+
 def negative_completeness_log_likelihood(
     params: np.ndarray,
     observable_context: ObservablePredictionContext,
     predicted_complete_counts: np.ndarray,
+    assumed_mean_completeness: float | None = DEFAULT_ASSUMED_MEAN_COMPLETENESS,
 ) -> float:
+    params = anchored_completeness_params(
+        params, observable_context, predicted_complete_counts, assumed_mean_completeness
+    )
     completeness_bin_grid = evaluate_completeness_bin_grid(params, observable_context)
     mu = np.clip(predicted_complete_counts * completeness_bin_grid, 1.0e-12, None)
     observed = observable_context.observed_counts
     return float(-(np.sum(observed * np.log(mu) - mu)))
 
 
-def evaluate_completeness_bin_grid(
+def completeness_shape_logits(
     raw_params: np.ndarray,
     observable_context: ObservablePredictionContext,
 ) -> np.ndarray:
-    intercept = float(raw_params[0])
+    """Intercept-free part of the completeness logit.
+
+    Slopes are exponentiated, so completeness is forced to increase with present
+    mass, decrease with distance and increase with |b|. That monotonicity is an
+    assumption the data cannot overturn; it is deliberate, and it is what makes
+    the *shape* identifiable once the amplitude is anchored.
+    """
     mass_slope = float(np.exp(raw_params[1]))
     distance_slope = float(np.exp(raw_params[2]))
     latitude_slope = float(np.exp(raw_params[3]))
@@ -1631,8 +1921,64 @@ def evaluate_completeness_bin_grid(
     z_latitude = (
         observable_context.abs_latitude_centers_deg[None, None, :] - observable_context.abs_latitude_feature_mean
     ) / observable_context.abs_latitude_feature_std
-    logits = intercept + mass_slope * z_mass - distance_slope * z_distance + latitude_slope * z_latitude
-    return np.clip(special.expit(logits), 1.0e-6, 1.0)
+    return mass_slope * z_mass - distance_slope * z_distance + latitude_slope * z_latitude
+
+
+def evaluate_completeness_bin_grid(
+    raw_params: np.ndarray,
+    observable_context: ObservablePredictionContext,
+) -> np.ndarray:
+    """Completeness on the (present mass, distance, |b|) bin grid.
+
+    ``raw_params[0]`` is the intercept. When the caller is anchoring the mean
+    completeness it will have already solved for that intercept with
+    ``solve_intercept_for_mean_completeness`` and written it into slot 0, so this
+    function stays a plain evaluator either way.
+    """
+    intercept = float(raw_params[0])
+    shape_logits = completeness_shape_logits(raw_params, observable_context)
+    return np.clip(special.expit(intercept + shape_logits), 1.0e-6, 1.0)
+
+
+def solve_intercept_for_mean_completeness(
+    raw_params: np.ndarray,
+    observable_context: ObservablePredictionContext,
+    weights: np.ndarray,
+    assumed_mean_completeness: float,
+) -> float:
+    """Intercept that makes the weighted mean completeness equal a declared value.
+
+    ``weights`` are the predicted complete counts per observable bin, so the mean
+    is the completeness the survey would actually achieve over the modelled
+    population. The weighted mean of expit(t + s) is strictly increasing in t, so
+    the root is unique and bracketing is safe.
+
+    This turns the completeness amplitude from something the logistic form quietly
+    decides into something the analyst declares out loud -- the same treatment
+    `log_mass_min` gets in `mass_grid`.
+    """
+    shape_logits = completeness_shape_logits(raw_params, observable_context)
+    weights = np.asarray(weights, dtype=float)
+    weight_sum = float(np.sum(weights))
+    if weight_sum <= 0.0:
+        raise ValueError("Cannot anchor the mean completeness with zero total weight.")
+
+    def mean_completeness_residual(intercept: float) -> float:
+        completeness = special.expit(intercept + shape_logits)
+        return float(np.sum(weights * completeness) / weight_sum - assumed_mean_completeness)
+
+    # The bracket has to dominate the shape logits, not just be "big". The slopes
+    # are exponentiated with an upper bound of exp(4) ~ 55 and the standardised
+    # features reach |z| ~ 2, so the shape term alone can exceed 100; a fixed
+    # +/-40 bracket silently fails to contain the root in exactly those cases.
+    shape_span = float(np.max(np.abs(shape_logits)))
+    limit = shape_span + 50.0
+    if mean_completeness_residual(-limit) > 0.0 or mean_completeness_residual(limit) < 0.0:
+        raise ValueError(
+            f"Cannot reach an assumed mean completeness of {assumed_mean_completeness} "
+            "with these completeness slopes; the target is outside the achievable range."
+        )
+    return float(optimize.brentq(mean_completeness_residual, -limit, limit, xtol=1.0e-10))
 
 
 def compute_effective_completeness_grid(

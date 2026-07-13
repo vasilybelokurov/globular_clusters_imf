@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(source .venv/bin/activate)",
+      "Bash(source ~/Work/venvs/.venv/bin/activate)",
+      "Bash(python - *)",
+      "Bash(python -c *)",
+      "Bash(python3 - *)",
+      "Bash(python3 -c *)",
+      "Bash(python -m pytest *)",
+      "Bash(python3 -m pytest *)",
+      "Bash(pytest *)",
+      "Bash(python -m compileall *)",
+      "Bash(mkdir -p *)"
+    ]
+  }
+}
