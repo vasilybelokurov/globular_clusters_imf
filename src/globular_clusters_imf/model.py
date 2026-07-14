@@ -17,21 +17,34 @@ LARGE_PENALTY = 1.0e30
 # Circular speed entering the dissolution-time scaling t_dis ~ (V_c / V_c,ref)^-1.
 #
 # This previously read `MILKY_WAY_CIRCULAR_SPEED_KMS = 240.0` divided by a *literal*
-# 240.0, so the factor was identically 1.0 for every cluster. The constant looked
-# like a physical, tunable input but was inert: changing it did nothing.
+# 240.0, so the factor was identically 1.0 for every cluster: the constant looked like a
+# physical, tunable input but was inert. Both ends of the ratio are now named, so the
+# scaling is live.
 #
-# Both ends of the ratio are now named, so the scaling is live and adjusting the
-# adopted circular speed actually propagates.
+# The reference velocity is the one the Baumgardt & Makino (2003) fit is normalised to:
 #
-# The reference value is kept at 240.0 so that this refactor does NOT change any
-# fitted number. UNVERIFIED: the reference velocity of the underlying
-# Baumgardt & Makino (2003) calibration has not been checked against the paper,
-# and it may well be 220 km/s, in which case every dissolution time here is ~9 per
-# cent off and every survival cut moves with it. This needs to be confirmed
-# against the source before the next fit is published; it is deliberately left
-# behaviour-preserving rather than changed on a guess.
+#   T_diss/Myr = beta (N / ln(gamma N))^x (R_G/kpc) (V_G / 220 km/s)^-1 (1 - e)
+#
+#   Baumgardt & Makino 2003, MNRAS 340, 227   https://arxiv.org/abs/astro-ph/0211471
+#
+# so V_ref = 220, NOT 240. Gieles & Gnedin (2023), which extends the same prescription,
+# likewise normalises its tidal frequency to 220 km/s -- and `gg23_survivability.py`
+# already had GG23_REFERENCE_VC_KMS = 220.0. Only this module was inconsistent.
+#
+# The bug was that this read `MILKY_WAY_CIRCULAR_SPEED_KMS = 240.0` divided by a *literal*
+# 240.0, so the ratio was identically 1.0 and the (240/220)^-1 = 0.917 correction was
+# silently dropped. The constant looked physical and tunable but was inert.
+#
+# NOTE ON WHAT THIS DOES AND DOES NOT CHANGE. The ratio is a global constant factor k on
+# t_dis, and the survival threshold solves t_dis(M_cut) = 12 Gyr / eta_t. So
+# t_dis -> k*t_dis is EXACTLY eta_t -> eta_t/k, and eta_t is a free fitted parameter.
+# Correcting 240 -> 220 therefore does not bias the survival surface, alpha, M_c or N0:
+# it only relabels eta_t, by 1/k = 1.0909. The fitted eta_t moves 1.147 -> 1.251, well
+# inside its posterior width of ~0.28. This is a correctness/clarity fix, not a bias fix --
+# but it means eta_t now literally is "the lifetime scale relative to BM03 at the adopted
+# V_c", rather than "relative to BM03 with its velocity correction quietly discarded".
 MILKY_WAY_CIRCULAR_SPEED_KMS = 240.0
-DISSOLUTION_REFERENCE_CIRCULAR_SPEED_KMS = 240.0
+DISSOLUTION_REFERENCE_CIRCULAR_SPEED_KMS = 220.0
 
 
 # The lognormal is a density in log10(M); the power law is naturally a density in

@@ -124,3 +124,69 @@ class TestRhat:
         assert np.isnan(compute_rhat(np.zeros((1, 10))))
         assert np.isnan(compute_rhat(np.zeros((4, 1))))
         assert np.isnan(compute_rhat(np.ones((4, 10))))  # zero within-chain variance
+
+
+class TestCircularSpeedDegeneracy:
+    """The dissolution-time reference velocity is degenerate with eta_t.
+
+    It enters as a constant factor k on t_dis, and the survival cut solves
+    t_dis(M_cut) = 12 Gyr / eta_t. So t_dis -> k*t_dis is exactly eta_t -> eta_t/k, and
+    eta_t is fitted. The adopted V_ref therefore cannot move any result -- which is why
+    the constant is left at 240 rather than "corrected" to 220.
+    """
+
+    def test_reference_velocity_is_exactly_absorbed_by_eta_t(self):
+        from globular_clusters_imf.model import AGE_MYR, total_dissolution_time_myr
+        from scipy import optimize
+
+        def survival_cut(r_apo, ecc, eta_t, v_ref):
+            age = AGE_MYR / eta_t
+
+            def objective(log_mass):
+                return (
+                    total_dissolution_time_myr(
+                        10.0**log_mass, r_apo, ecc,
+                        circular_speed_kms=240.0,
+                        reference_circular_speed_kms=v_ref,
+                    )
+                    - age
+                )
+
+            return optimize.brentq(objective, 2.0, 8.5)
+
+        k = (240.0 / 220.0) ** -1
+        for r_apo, ecc in [(2.0, 0.6), (5.0, 0.5), (10.0, 0.4), (20.0, 0.3), (50.0, 0.2)]:
+            with_240 = survival_cut(r_apo, ecc, 1.147, 240.0)
+            with_220 = survival_cut(r_apo, ecc, 1.147 / k, 220.0)
+            assert with_240 == pytest.approx(with_220, abs=1.0e-9), (
+                f"V_ref must be absorbable by eta_t at r_apo={r_apo}, e={ecc}"
+            )
+
+    def test_the_reference_velocity_matches_baumgardt_makino(self):
+        """BM03 normalise to 220 km/s, not 240.
+
+            T_diss = beta (N/ln(gamma N))^x (R_G/kpc) (V_G / 220 km/s)^-1 (1-e)
+            Baumgardt & Makino 2003, MNRAS 340, 227 (arXiv:astro-ph/0211471)
+
+        gg23_survivability.py already used 220 (GG23 extends the same prescription);
+        model.py was the inconsistent one, and it divided by a *literal* 240 so the
+        correction was silently dropped entirely.
+        """
+        from globular_clusters_imf.gg23_survivability import GG23_REFERENCE_VC_KMS
+        from globular_clusters_imf.model import (
+            DISSOLUTION_REFERENCE_CIRCULAR_SPEED_KMS,
+            MILKY_WAY_CIRCULAR_SPEED_KMS,
+            total_dissolution_time_myr,
+        )
+
+        assert DISSOLUTION_REFERENCE_CIRCULAR_SPEED_KMS == 220.0
+        assert GG23_REFERENCE_VC_KMS == 220.0, "the two survival backends must agree"
+        assert MILKY_WAY_CIRCULAR_SPEED_KMS == 240.0  # adopted MW circular speed
+
+        # the correction is now actually applied, not identically 1.0
+        applied = total_dissolution_time_myr(1.0e5, 10.0, 0.4)
+        dropped = total_dissolution_time_myr(
+            1.0e5, 10.0, 0.4, circular_speed_kms=240.0, reference_circular_speed_kms=240.0
+        )
+        assert applied != pytest.approx(dropped)
+        assert applied == pytest.approx(dropped * (240.0 / 220.0) ** -1)
