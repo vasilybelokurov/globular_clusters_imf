@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import pickle
 from pathlib import Path
 
@@ -32,6 +33,7 @@ from .plotting import (
     rebin_expected_counts_2d,
 )
 from .smooth_survivability import build_smooth_survivability_grid
+from .paper_summary import merge_latex_macros, merge_paper_results_summary
 
 PAPER_LOG_MASS_MIN = 4.0
 
@@ -236,7 +238,7 @@ def build_paper_assets(project_root: Path) -> dict[str, object]:
         split_alpha_results=split_alpha_results,
         conditional_class_table=conditional_class_table,
     )
-    (tables_dir / "paper_results_summary.json").write_text(json.dumps(summary_payload, indent=2))
+    merge_paper_results_summary(tables_dir, summary_payload)
     write_summary_macros_tex(summary_payload, tables_dir / "paper_numbers.tex")
 
     return {
@@ -2329,7 +2331,7 @@ def build_key_results_table(
             "alpha_dndm": shared_imf.get("alpha_dndm"),
             "log10_m_c_msun": shared_imf.get("log10_m_c_msun"),
             "total_initial_count": float(shared_components.loc["in_situ", "total_initial_count"]),
-            "selection_fraction": float(shared_components.loc["in_situ", "survival_fraction"]),
+            "selection_fraction": float(shared_components.loc["in_situ", "selection_fraction"]),
             "total_initial_stellar_mass_msun": float(shared_component_masses["in_situ"]),
         },
         {
@@ -2340,7 +2342,7 @@ def build_key_results_table(
             "alpha_dndm": shared_imf.get("alpha_dndm"),
             "log10_m_c_msun": shared_imf.get("log10_m_c_msun"),
             "total_initial_count": float(shared_components.loc["accreted", "total_initial_count"]),
-            "selection_fraction": float(shared_components.loc["accreted", "survival_fraction"]),
+            "selection_fraction": float(shared_components.loc["accreted", "selection_fraction"]),
             "total_initial_stellar_mass_msun": float(shared_component_masses["accreted"]),
         },
         {
@@ -2351,7 +2353,7 @@ def build_key_results_table(
             "alpha_dndm": split_alpha_in_situ_imf.get("alpha_dndm"),
             "log10_m_c_msun": split_alpha_in_situ_imf.get("log10_m_c_msun"),
             "total_initial_count": float(split_alpha_components.loc["in_situ", "total_initial_count"]),
-            "selection_fraction": float(split_alpha_components.loc["in_situ", "survival_fraction"]),
+            "selection_fraction": float(split_alpha_components.loc["in_situ", "selection_fraction"]),
             "total_initial_stellar_mass_msun": float(split_alpha_component_masses["in_situ"]),
         },
         {
@@ -2362,7 +2364,7 @@ def build_key_results_table(
             "alpha_dndm": split_alpha_accreted_imf.get("alpha_dndm"),
             "log10_m_c_msun": split_alpha_accreted_imf.get("log10_m_c_msun"),
             "total_initial_count": float(split_alpha_components.loc["accreted", "total_initial_count"]),
-            "selection_fraction": float(split_alpha_components.loc["accreted", "survival_fraction"]),
+            "selection_fraction": float(split_alpha_components.loc["accreted", "selection_fraction"]),
             "total_initial_stellar_mass_msun": float(split_alpha_component_masses["accreted"]),
         },
     ]
@@ -2528,6 +2530,30 @@ def write_population_class_table_tex(table: pd.DataFrame, output_path: Path) -> 
     output_path.write_text("\n".join(lines) + "\n")
 
 
+LEGACY_FRACTION_COLUMN_RENAMES = {
+    "survival_fraction": "selection_fraction",
+    "survival_fraction_in_situ": "selection_fraction_in_situ",
+    "survival_fraction_accreted": "selection_fraction_accreted",
+    "in_situ_survival_fraction": "in_situ_selection_fraction",
+    "accreted_survival_fraction": "accreted_selection_fraction",
+}
+
+
+def normalize_legacy_fraction_columns(table: pd.DataFrame) -> pd.DataFrame:
+    """Accept CSVs written before `survival_fraction` was renamed.
+
+    The column held survival x detectability all along -- the old name was simply
+    wrong. Tables already on disk still carry it, and the paper builders read their
+    own previous output, so a rename in the writer alone would break them. Normalise
+    on read rather than forcing a full regeneration of every artefact at once.
+    """
+    present = {old: new for old, new in LEGACY_FRACTION_COLUMN_RENAMES.items() if old in table.columns}
+    if not present:
+        return table
+    table = table.rename(columns=present)
+    return table
+
+
 def write_key_results_table_tex(table: pd.DataFrame, output_path: Path) -> None:
     lines = [
         r"\begin{table*}",
@@ -2540,6 +2566,7 @@ def write_key_results_table_tex(table: pd.DataFrame, output_path: Path) -> None:
         r"Model & Component & IMF & $A(a)$ & $\alpha$ & $\log_{10}(M_{\rm c}/{\rm M}_\odot)$ & $N_0$ & $f_{\rm sel}$ & $M_{\star,0}$ [$10^8\,{\rm M}_\odot$] \\",
         r"\hline",
     ]
+    table = normalize_legacy_fraction_columns(table)
     for row in table.itertuples(index=False):
         alpha_value = "..." if pd.isna(row.alpha_dndm) else f"{row.alpha_dndm:.3f}"
         mc_value = "..." if pd.isna(row.log10_m_c_msun) else f"{row.log10_m_c_msun:.3f}"
@@ -2550,6 +2577,12 @@ def write_key_results_table_tex(table: pd.DataFrame, output_path: Path) -> None:
         )
     lines.extend([r"\hline", r"\end{tabular}}", r"\end{table*}"])
     output_path.write_text("\n".join(lines) + "\n")
+
+
+def _parse_providecommand(line: str) -> tuple[str | None, str]:
+    """Pull (name, value) out of a rendered \\providecommand line."""
+    match = re.match(r"\\providecommand\{\\(\w+)\}\{(.*)\}\s*$", line.strip())
+    return (match.group(1), match.group(2)) if match else (None, "")
 
 
 def write_summary_macros_tex(summary_payload: dict[str, object], output_path: Path) -> None:
@@ -2578,7 +2611,18 @@ def write_summary_macros_tex(summary_payload: dict[str, object], output_path: Pa
         rf"\providecommand{{\SharedVsSingleDeltaBICCond}}{{{comparison['single_population']['delta_conditional_bic']:.1f}}}",
         rf"\providecommand{{\SplitAlphaVsSharedDeltaBICCond}}{{{comparison['two_component_split_alpha']['delta_conditional_bic']:.1f}}}",
     ]
-    output_path.write_text("\n".join(lines) + "\n")
+    # MERGE, never clobber. build_paper_assets_exact_single_component.py writes the
+    # Exact*/Posterior*/StepFive*/PowerLawA* macros into this SAME file, and those are the
+    # ones main.tex actually cites. A plain write_text here erased all 28 of them and left
+    # the manuscript uncompilable -- the same bug as paper_results_summary.json.
+    merge_latex_macros(
+        output_path,
+        dict(
+            entry
+            for entry in (_parse_providecommand(line) for line in lines)
+            if entry[0] is not None
+        ),
+    )
 
 
 def mean_cluster_initial_mass_from_grid(log_mass_grid: np.ndarray, imf_density_grid: np.ndarray) -> float:

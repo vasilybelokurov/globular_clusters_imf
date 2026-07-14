@@ -55,25 +55,34 @@ def test_fixed_iteration_count_is_refused(fit_sample, scratch_root):
         )
 
 
-def test_non_convergence_raises_rather_than_returning_a_number(fit_sample, scratch_root):
-    """Starve it of iterations: it must fail, not hand back the last iterate."""
-    with pytest.raises(DetectabilityConvergenceError, match="did NOT converge"):
-        fit_single_component_detectability_em(
+def test_non_convergence_is_recorded_not_raised_by_default(fit_sample, scratch_root):
+    """A scan MUST be able to evaluate drifting trials -- the profile likelihood rejects
+    them. Raising by default would delete them by hand, which is precisely what the
+    method is designed not to do (paper, Sec. 4.1). So: flag it, return it, warn."""
+    with pytest.warns(RuntimeWarning):
+        result = fit_single_component_detectability_em(
             fit_sample, scratch_root, spec=SPEC, max_iterations=2, tolerance=1.0e-12
         )
+    assert result["convergence"].converged is False
+    assert result["convergence"].parameter_residual > 0.0
 
 
-def test_assert_em_converged_is_loud_by_default():
-    assert assert_em_converged(1.0e-9, n_iterations_run=3, label="x") is True
+def test_raising_is_available_for_reported_results(fit_sample, scratch_root):
+    """Where a FINAL result is being published, a non-converged iterate is not a number
+    anyone may quote -- there the caller opts in to hard failure."""
     with pytest.raises(DetectabilityConvergenceError):
-        assert_em_converged(1.0, n_iterations_run=3, label="x")
-    with pytest.warns(RuntimeWarning, match="did NOT converge"):
-        assert (
-            assert_em_converged(
-                1.0, n_iterations_run=3, label="x", raise_on_non_convergence=False
-            )
-            is False
+        fit_single_component_detectability_em(
+            fit_sample, scratch_root, spec=SPEC, max_iterations=2, tolerance=1.0e-12,
+            raise_on_non_convergence=True,
         )
+
+
+def test_assert_em_converged_warns_by_default_and_raises_on_request():
+    assert assert_em_converged(1.0e-9, n_iterations_run=3, label="x") is True
+    with pytest.warns(RuntimeWarning, match="did NOT converge"):
+        assert assert_em_converged(1.0, n_iterations_run=3, label="x") is False
+    with pytest.raises(DetectabilityConvergenceError):
+        assert_em_converged(1.0, n_iterations_run=3, label="x", raise_on_non_convergence=True)
 
 
 class _FakeObservableContext:

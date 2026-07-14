@@ -138,7 +138,7 @@ def main() -> None:
     best_result = fit_single_component_detectability_em_with_abs_longitude(
         prepared_catalog,
         project_root=output_root,
-        n_iterations=8,
+        n_iterations=200,
     )
     fixed_q_grid = (
         best_result["final_effective_completeness_grid"]

@@ -55,7 +55,7 @@ def _build_illustrative_results() -> list[dict[str, object]]:
             fit_catalog,
             project_root=PROJECT_ROOT,
             spec=JointModelSpec(imf_family="schechter", radial_model="logpoly3"),
-            n_iterations=30,
+            n_iterations=200,
             fixed_imf_params=np.array([alpha, log_mc], dtype=float),
             survival_grid_override=survivability_map,
         )

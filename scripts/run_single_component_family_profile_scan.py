@@ -373,7 +373,7 @@ def main() -> None:
         prepared_catalog,
         project_root=output_root,
         model_specs=comparison_specs,
-        n_iterations=12,
+        n_iterations=200,
         survival_grid_override=survival_grid_override,
     )
     unconstrained_table = unconstrained_comparison["summary_table"].copy()
@@ -404,7 +404,7 @@ def main() -> None:
             "radial": np.asarray(reference_result["final_payload"]["raw_parameters"][imf_param_count:], dtype=float),
         }
 
-    n_iterations = 12
+    n_iterations=200
     powerlaw_alpha_grid = np.linspace(-3.0, -0.8, 29)
     lognormal_mu_grid = np.linspace(3.5, 5.85, 17)
     lognormal_sigma_grid = np.linspace(0.35, 1.05, 9)

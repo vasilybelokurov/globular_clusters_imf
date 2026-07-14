@@ -183,13 +183,13 @@ def main() -> None:
         prepared_catalog,
         project_root=output_root,
         spec=schechter_spec,
-        n_iterations=8,
+        n_iterations=200,
     )
     powerlaw_reference_result = fit_single_component_detectability_em_with_abs_longitude(
         prepared_catalog,
         project_root=output_root,
         spec=powerlaw_spec,
-        n_iterations=8,
+        n_iterations=200,
     )
 
     best_alpha = -2.225
@@ -212,7 +212,7 @@ def main() -> None:
             prepared_catalog,
             project_root=output_root,
             spec=powerlaw_spec,
-            n_iterations=6,
+            n_iterations=200,
             fixed_imf_params=np.array([alpha], dtype=float),
             start_completeness_raw_parameters=np.asarray(start_completeness, dtype=float),
             start_radial_params=np.asarray(start_radial, dtype=float),

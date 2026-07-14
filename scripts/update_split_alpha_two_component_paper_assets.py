@@ -12,6 +12,7 @@ from globular_clusters_imf.detectability_longitude_model import (
 )
 from globular_clusters_imf.joint_model import fit_fixed_survival_joint_models
 from globular_clusters_imf.model import fit_catalog_models
+from globular_clusters_imf.paper_summary import merge_paper_results_summary
 from globular_clusters_imf.paper_assets import (
     build_conditional_population_model_table,
     build_key_results_table,
@@ -93,7 +94,7 @@ def main() -> None:
         split_alpha_results=split_alpha_results,
         conditional_class_table=conditional_class_table,
     )
-    (tables_dir / "paper_results_summary.json").write_text(json.dumps(summary_payload, indent=2))
+    merge_paper_results_summary(tables_dir, summary_payload)
     write_summary_macros_tex(summary_payload, tables_dir / "paper_numbers.tex")
 
     shared_best = shared_results["summary_table"].iloc[0]

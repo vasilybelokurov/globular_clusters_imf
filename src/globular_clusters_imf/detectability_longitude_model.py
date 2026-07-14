@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import warnings
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -9,6 +10,9 @@ import pandas as pd
 from scipy import optimize, special
 
 from .detectability_model import (
+    DEFAULT_EM_TOLERANCE,
+    StallDetector,
+    DetectabilityConvergenceError,
     assert_em_converged,
     PresentMassProxyModel,
     aggregate_two_component_selection_stats,
@@ -196,21 +200,55 @@ def fit_detectability_corrected_single_component_models_with_abs_longitude(
 
     all_results = []
     summary_rows: list[dict[str, object]] = []
+    non_convergent_rows: list[dict[str, object]] = []
     for spec in model_specs:
-        result = fit_single_component_detectability_em_with_abs_longitude(
-            catalog=catalog,
-            project_root=project_root,
-            spec=spec,
-            survival_grid_override=survival_grid_override,
-            **kwargs,
-        )
+        try:
+            result = fit_single_component_detectability_em_with_abs_longitude(
+                catalog=catalog,
+                project_root=project_root,
+                spec=spec,
+                survival_grid_override=survival_grid_override,
+                **kwargs,
+            )
+        except DetectabilityConvergenceError as error:
+            # Only reachable if a caller explicitly passed raise_on_non_convergence=True.
+            #
+            # Do NOT drop non-converging families from the comparison by default. I did
+            # that at first and it was wrong: the method is *designed* to evaluate trials
+            # that drift and let the outer profile likelihood disfavour them (paper,
+            # Sec. 4.1: "not removed by hand, but retained as likelihood evaluations and
+            # naturally disfavoured"). Deleting them here would be removing them by hand,
+            # and it would silently change the published radial-family comparison, which
+            # compares logpoly3 against step5, powerlaw_a and cored_powerlaw_a precisely
+            # so that the likelihood can rank them.
+            warnings.warn(
+                f"{spec.imf_family} + {spec.radial_model}: {error}",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            non_convergent_rows.append(
+                {
+                    "imf_family": spec.imf_family,
+                    "radial_model": spec.radial_model,
+                    "reason": "detectability iteration did not reach a fixed point",
+                    "detail": str(error),
+                }
+            )
+            continue
         all_results.append(result)
         summary_rows.append(build_detectability_corrected_performance_row(result))
+
+    if not summary_rows:
+        raise DetectabilityConvergenceError(
+            "No IMF family reached a fixed point under the detectability model; "
+            "there is nothing to compare."
+        )
 
     summary_table = pd.DataFrame(summary_rows).sort_values(
         ["log_likelihood", "rms_residual_sigma_2d"],
         ascending=[False, True],
     ).reset_index(drop=True)
+    non_convergent_table = pd.DataFrame(non_convergent_rows)
     best_spec = JointModelSpec(
         imf_family=str(summary_table.iloc[0]["imf_family"]),
         radial_model=str(summary_table.iloc[0]["radial_model"]),
@@ -227,6 +265,9 @@ def fit_detectability_corrected_single_component_models_with_abs_longitude(
         "all_results": all_results,
         "summary_table": summary_table,
         "best_result": best_result,
+        # Families with no fixed point. Must be reported alongside the comparison:
+        # their absence from the table is itself a result, not an omission.
+        "non_convergent_table": non_convergent_table,
     }
 
 
@@ -235,7 +276,7 @@ def fit_single_component_detectability_em_with_abs_longitude(
     project_root: Path,
     spec: JointModelSpec | None = None,
     n_iterations: int = 12,
-    raise_on_non_convergence: bool = True,
+    raise_on_non_convergence: bool = False,
     relaxation: float = 0.7,
     n_present_mass_bins: int = 6,
     n_distance_bins: int = 6,
@@ -321,6 +362,8 @@ def fit_single_component_detectability_em_with_abs_longitude(
     current_effective_completeness_grid = np.ones_like(base_context.survival_probability_grid)
     report_log_mass_min = 4.0
 
+    em_stall_detector = StallDetector()
+    em_stalled = False
     for iteration in range(1, n_iterations + 1):
         completeness_bin_grid = evaluate_completeness_bin_grid_with_abs_longitude(
             current_raw_params,
@@ -409,11 +452,24 @@ def fit_single_component_detectability_em_with_abs_longitude(
             )
         )
 
+        # Stop as soon as the fixed point is reached; `n_iterations` is a cap, not a
+        # target. Iterating a fixed number of times and reporting the last iterate is
+        # the bug this replaced.
+        if em_parameter_residual < DEFAULT_EM_TOLERANCE:
+            break
+        # ...and stop early if the residual has stopped improving. A stalled iteration
+        # will not converge by grinding to the cap; bailing out reports the same
+        # non-convergent outcome ~10x sooner.
+        if em_stall_detector.update(em_parameter_residual):
+            em_stalled = True
+            break
+
     em_converged = assert_em_converged(
         parameter_residual=em_parameter_residual,
         n_iterations_run=iteration,
         label="fit_single_component_detectability_em_with_abs_longitude",
         raise_on_non_convergence=raise_on_non_convergence,
+        stalled=em_stalled,
     )
     final_completeness_bin_grid = evaluate_completeness_bin_grid_with_abs_longitude(
         current_raw_params,
@@ -530,6 +586,12 @@ def fit_single_component_detectability_em_with_abs_longitude(
 
     return {
         "spec": spec,
+        # Convergence is RECORDED, never used to silently drop a trial: the outer profile
+        # likelihood is what rejects drifting solves (paper, Sec. 4.1).
+        "em_converged": bool(em_converged),
+        "em_parameter_residual": float(em_parameter_residual),
+        "em_stalled": bool(em_stalled),
+        "em_iterations_run": int(iteration),
         "selection_offset_dex": selection_offset_dex,
         "base_context": base_context,
         "final_context": final_context,
@@ -922,7 +984,7 @@ def fit_shared_imf_two_component_detectability_em_single_model_with_abs_longitud
     component_base_contexts: dict[str, JointLikelihoodContext],
     spec: SharedImfTwoComponentSpec,
     n_iterations: int = 12,
-    raise_on_non_convergence: bool = True,
+    raise_on_non_convergence: bool = False,
     relaxation: float = 0.7,
     fixed_effective_completeness_grid: np.ndarray | None = None,
     fixed_completeness_bin_grid: np.ndarray | None = None,
@@ -983,6 +1045,8 @@ def fit_shared_imf_two_component_detectability_em_single_model_with_abs_longitud
     current_contexts = component_base_contexts
     current_payload = baseline_payload
 
+    em_stall_detector = StallDetector()
+    em_stalled = False
     for iteration in range(1, n_iterations + 1):
         completeness_bin_grid = evaluate_completeness_bin_grid_with_abs_longitude(current_raw_params, observable_context)
         effective_completeness_grid = compute_effective_completeness_grid_with_abs_longitude(
@@ -1041,11 +1105,24 @@ def fit_shared_imf_two_component_detectability_em_single_model_with_abs_longitud
             )
         )
 
+        # Stop as soon as the fixed point is reached; `n_iterations` is a cap, not a
+        # target. Iterating a fixed number of times and reporting the last iterate is
+        # the bug this replaced.
+        if em_parameter_residual < DEFAULT_EM_TOLERANCE:
+            break
+        # ...and stop early if the residual has stopped improving. A stalled iteration
+        # will not converge by grinding to the cap; bailing out reports the same
+        # non-convergent outcome ~10x sooner.
+        if em_stall_detector.update(em_parameter_residual):
+            em_stalled = True
+            break
+
     em_converged = assert_em_converged(
         parameter_residual=em_parameter_residual,
         n_iterations_run=iteration,
         label="fit_shared_imf_two_component_detectability_em_single_model_with_abs_longitude",
         raise_on_non_convergence=raise_on_non_convergence,
+        stalled=em_stalled,
     )
     final_completeness_bin_grid = evaluate_completeness_bin_grid_with_abs_longitude(current_raw_params, observable_context)
     final_effective_completeness_grid = compute_effective_completeness_grid_with_abs_longitude(
@@ -1123,6 +1200,12 @@ def fit_shared_imf_two_component_detectability_em_single_model_with_abs_longitud
     }
     return {
         "spec": spec,
+        # Convergence is RECORDED, never used to silently drop a trial: the outer profile
+        # likelihood is what rejects drifting solves (paper, Sec. 4.1).
+        "em_converged": bool(em_converged),
+        "em_parameter_residual": float(em_parameter_residual),
+        "em_stalled": bool(em_stalled),
+        "em_iterations_run": int(iteration),
         "baseline_payload": baseline_payload,
         "final_payload": final_payload,
         "final_contexts": final_contexts,
@@ -1288,7 +1371,7 @@ def fit_split_alpha_two_component_detectability_em_single_model_with_abs_longitu
     component_base_contexts: dict[str, JointLikelihoodContext],
     spec: SplitAlphaTwoComponentSpec,
     n_iterations: int = 12,
-    raise_on_non_convergence: bool = True,
+    raise_on_non_convergence: bool = False,
     relaxation: float = 0.7,
     fixed_effective_completeness_grid: np.ndarray | None = None,
     fixed_completeness_bin_grid: np.ndarray | None = None,
@@ -1350,6 +1433,8 @@ def fit_split_alpha_two_component_detectability_em_single_model_with_abs_longitu
     current_contexts = component_base_contexts
     current_payload = baseline_payload
 
+    em_stall_detector = StallDetector()
+    em_stalled = False
     for iteration in range(1, n_iterations + 1):
         completeness_bin_grid = evaluate_completeness_bin_grid_with_abs_longitude(current_raw_params, observable_context)
         effective_completeness_grid = compute_effective_completeness_grid_with_abs_longitude(
@@ -1408,11 +1493,24 @@ def fit_split_alpha_two_component_detectability_em_single_model_with_abs_longitu
             )
         )
 
+        # Stop as soon as the fixed point is reached; `n_iterations` is a cap, not a
+        # target. Iterating a fixed number of times and reporting the last iterate is
+        # the bug this replaced.
+        if em_parameter_residual < DEFAULT_EM_TOLERANCE:
+            break
+        # ...and stop early if the residual has stopped improving. A stalled iteration
+        # will not converge by grinding to the cap; bailing out reports the same
+        # non-convergent outcome ~10x sooner.
+        if em_stall_detector.update(em_parameter_residual):
+            em_stalled = True
+            break
+
     em_converged = assert_em_converged(
         parameter_residual=em_parameter_residual,
         n_iterations_run=iteration,
         label="fit_split_alpha_two_component_detectability_em_single_model_with_abs_longitude",
         raise_on_non_convergence=raise_on_non_convergence,
+        stalled=em_stalled,
     )
     final_completeness_bin_grid = evaluate_completeness_bin_grid_with_abs_longitude(current_raw_params, observable_context)
     final_effective_completeness_grid = compute_effective_completeness_grid_with_abs_longitude(
@@ -1491,6 +1589,12 @@ def fit_split_alpha_two_component_detectability_em_single_model_with_abs_longitu
     }
     return {
         "spec": spec,
+        # Convergence is RECORDED, never used to silently drop a trial: the outer profile
+        # likelihood is what rejects drifting solves (paper, Sec. 4.1).
+        "em_converged": bool(em_converged),
+        "em_parameter_residual": float(em_parameter_residual),
+        "em_stalled": bool(em_stalled),
+        "em_iterations_run": int(iteration),
         "baseline_payload": baseline_payload,
         "final_payload": final_payload,
         "final_contexts": final_contexts,
@@ -1673,7 +1777,7 @@ def fit_separate_imf_two_component_detectability_em_single_model_with_abs_longit
     in_situ_spec: JointModelSpec,
     accreted_spec: JointModelSpec,
     n_iterations: int = 12,
-    raise_on_non_convergence: bool = True,
+    raise_on_non_convergence: bool = False,
     relaxation: float = 0.7,
     **_: object,
 ) -> dict[str, object]:
@@ -1705,6 +1809,8 @@ def fit_separate_imf_two_component_detectability_em_single_model_with_abs_longit
     current_component_payloads = baseline_component_payloads
     current_pair_payload = baseline_pair_payload
 
+    em_stall_detector = StallDetector()
+    em_stalled = False
     for iteration in range(1, n_iterations + 1):
         completeness_bin_grid = evaluate_completeness_bin_grid_with_abs_longitude(current_raw_params, observable_context)
         effective_completeness_grid = compute_effective_completeness_grid_with_abs_longitude(
@@ -1778,11 +1884,24 @@ def fit_separate_imf_two_component_detectability_em_single_model_with_abs_longit
             )
         )
 
+        # Stop as soon as the fixed point is reached; `n_iterations` is a cap, not a
+        # target. Iterating a fixed number of times and reporting the last iterate is
+        # the bug this replaced.
+        if em_parameter_residual < DEFAULT_EM_TOLERANCE:
+            break
+        # ...and stop early if the residual has stopped improving. A stalled iteration
+        # will not converge by grinding to the cap; bailing out reports the same
+        # non-convergent outcome ~10x sooner.
+        if em_stall_detector.update(em_parameter_residual):
+            em_stalled = True
+            break
+
     em_converged = assert_em_converged(
         parameter_residual=em_parameter_residual,
         n_iterations_run=iteration,
         label="fit_separate_imf_two_component_detectability_em_single_model_with_abs_longitude",
         raise_on_non_convergence=raise_on_non_convergence,
+        stalled=em_stalled,
     )
     final_completeness_bin_grid = evaluate_completeness_bin_grid_with_abs_longitude(current_raw_params, observable_context)
     final_effective_completeness_grid = compute_effective_completeness_grid_with_abs_longitude(

@@ -1,4 +1,106 @@
 {
+  "n_clusters_total": 165,
+  "n_clusters_in_situ": 107,
+  "n_clusters_accreted": 58,
+  "single_component_best_model": {
+    "imf_family": "schechter",
+    "radial_model": "logpoly3",
+    "log_likelihood": 468.19506949582336,
+    "total_initial_count": 3485.3618042639414,
+    "total_initial_stellar_mass_msun": 597800965.9065435,
+    "selection_fraction": 0.24771038259242567,
+    "imf_parameters": {
+      "alpha_dndm": -0.8422567543961177,
+      "log10_m_c_msun": 6.29735356601391
+    },
+    "reported_log10_initial_mass_min": 4.0
+  },
+  "detectability_corrected_single_component_model": {
+    "imf_family": "schechter",
+    "radial_model": "logpoly3",
+    "log_likelihood": 395.54318517774016,
+    "total_initial_count": 114361.733140388,
+    "total_initial_stellar_mass_msun": 10609537994.724337,
+    "selection_fraction": 0.0006412816764904627,
+    "raw_survival_fraction": 0.017260766095022386,
+    "mean_detectability": 0.03715256165109576,
+    "reported_log10_initial_mass_min": 4.0,
+    "imf_parameters": {
+      "alpha_dndm": -1.675,
+      "log10_m_c_msun": 6.35
+    },
+    "count_ratio_vs_baseline": 32.812011941049995
+  },
+  "shared_imf_two_component_best_model": {
+    "imf_family": "schechter",
+    "in_situ_radial_model": "logpoly3",
+    "accreted_radial_model": "logpoly3",
+    "raw_log_likelihood": 451.47067734323554,
+    "conditional_log_likelihood": 558.4533006377151,
+    "conditional_bic": -1076.0590374842254,
+    "delta_conditional_bic": 0.0,
+    "total_initial_count": 1112.9847731699504,
+    "total_initial_stellar_mass_msun": 326942033.20245546,
+    "in_situ_total_initial_count": 953.1505974798973,
+    "in_situ_total_initial_stellar_mass_msun": 279990348.29619217,
+    "accreted_total_initial_count": 159.8341756900531,
+    "accreted_total_initial_stellar_mass_msun": 46951684.90626329,
+    "in_situ_selection_fraction": 0.11225928020493814,
+    "accreted_selection_fraction": 0.36287608547794137,
+    "mean_detectability": 0.8260294254891785,
+    "shared_imf_parameters": {
+      "alpha_dndm": -0.9182116564640382,
+      "log10_m_c_msun": 6.283282508396437
+    }
+  },
+  "split_alpha_two_component_best_model": {
+    "raw_log_likelihood": 451.5293539108445,
+    "conditional_log_likelihood": 558.511977205324,
+    "conditional_bic": -1071.0704451455426,
+    "delta_conditional_bic": 4.988592338682793,
+    "total_initial_count": 1292.0481213505825,
+    "total_initial_stellar_mass_msun": 330543960.46721053,
+    "mean_detectability": 0.82483398981942,
+    "shared_log10_m_c_msun": 6.298439898123312,
+    "in_situ_alpha_dndm": -0.9661012548143993,
+    "accreted_alpha_dndm": -0.9113815339362583
+  },
+  "population_model_class_comparison": [
+    {
+      "model_class": "two_component_shared_imf",
+      "description": "shared schechter; in-situ logpoly3; accreted logpoly3",
+      "n_parameters": 8,
+      "raw_log_likelihood": 451.47067734323554,
+      "conditional_log_likelihood": 558.4533006377151,
+      "raw_bic": -862.0937908952665,
+      "conditional_bic": -1076.0590374842254,
+      "delta_conditional_bic": 0.0,
+      "partition_constant": 106.98262329447948
+    },
+    {
+      "model_class": "two_component_split_alpha",
+      "description": "shared $M_{\\rm c}$, split $\\alpha$; in-situ logpoly3; accreted logpoly3",
+      "n_parameters": 9,
+      "raw_log_likelihood": 451.5293539108445,
+      "conditional_log_likelihood": 558.511977205324,
+      "raw_bic": -857.1051985565838,
+      "conditional_bic": -1071.0704451455426,
+      "delta_conditional_bic": 4.988592338682793,
+      "partition_constant": 106.98262329447948
+    },
+    {
+      "model_class": "single_population",
+      "description": "schechter + logpoly3",
+      "n_parameters": 5,
+      "raw_log_likelihood": 471.4261295229771,
+      "conditional_log_likelihood": 471.4261295229771,
+      "raw_bic": -917.3225316764513,
+      "conditional_bic": -917.3225316764513,
+      "delta_conditional_bic": 158.73650580777417,
+      "partition_constant": 106.98262329447948
+    }
+  ],
+  "lower_bound_total_initial_gcs_preferred_shared_imf": 1112.9847731699504,
   "single_component_exact_global_logpoly3": {
     "eta_t": 1.1465430236505043,
     "radial_model": "logpoly3",

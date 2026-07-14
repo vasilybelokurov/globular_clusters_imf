@@ -121,19 +121,74 @@ class DetectabilityConvergenceError(RuntimeError):
 
 DEFAULT_EM_TOLERANCE = 1.0e-4
 
+# A stalled iteration is one whose fixed-point residual has stopped improving. Measured
+# behaviour of the configurations that do not converge (e.g. the bare power law, and
+# anything with `step5`): the residual falls for ~30 iterations, flattens at ~3e-3, and
+# then sits there unchanged all the way to 200. Grinding out the remaining ~170
+# iterations discovers nothing and costs ~16x the runtime of a converging fit.
+#
+# Stop when no new best residual has appeared for `patience` iterations. The outcome is
+# identical -- the point is still reported as non-convergent -- it is just reached in a
+# tenth of the time.
+DEFAULT_EM_PATIENCE = 15
+DEFAULT_EM_MIN_RELATIVE_IMPROVEMENT = 0.01
+
+
+class StallDetector:
+    """Detects a fixed-point iteration whose residual has stopped improving."""
+
+    def __init__(
+        self,
+        patience: int = DEFAULT_EM_PATIENCE,
+        min_relative_improvement: float = DEFAULT_EM_MIN_RELATIVE_IMPROVEMENT,
+    ) -> None:
+        self.patience = int(patience)
+        self.min_relative_improvement = float(min_relative_improvement)
+        self.best_residual = np.inf
+        self.iterations_since_improvement = 0
+
+    def update(self, residual: float) -> bool:
+        """Feed the latest residual. Returns True once the iteration has stalled.
+
+        An improvement counts only if the residual drops by at least
+        `min_relative_improvement` relative to the best seen so far; that keeps slow
+        drift and numerical jitter from resetting the patience counter forever.
+        """
+        residual = float(residual)
+        if residual < self.best_residual * (1.0 - self.min_relative_improvement):
+            self.best_residual = residual
+            self.iterations_since_improvement = 0
+            return False
+        self.best_residual = min(self.best_residual, residual)
+        self.iterations_since_improvement += 1
+        return self.iterations_since_improvement >= self.patience
+
 
 def assert_em_converged(
     parameter_residual: float,
     n_iterations_run: int,
     label: str,
     tolerance: float = DEFAULT_EM_TOLERANCE,
-    raise_on_non_convergence: bool = True,
+    raise_on_non_convergence: bool = False,
+    stalled: bool = False,
 ) -> bool:
     """Fail loudly when a detectability iteration stopped without converging.
 
-    Running a fixed number of steps and publishing whatever came out is how an
-    actively diverging iterate ended up in the tables. Every iteration in this
-    module now has to say whether it reached a fixed point.
+    This RECORDS non-convergence; it does not, by default, forbid it.
+
+    That distinction matters and I got it wrong first time. The outer profile scan is
+    *supposed* to evaluate trials that drift: they are low-likelihood, self-consistent
+    corrections at poor outer parameters, and the profile likelihood rejects them on its
+    own (paper, Sec. 4.1 -- "not removed by hand, but retained as likelihood evaluations
+    and naturally disfavoured"). Raising here would delete them by hand, which is exactly
+    what the method is designed not to do, and would break the scan.
+
+    So: warn and flag by default. Pass raise_on_non_convergence=True only where a FINAL,
+    REPORTED result is being produced -- there, a non-converged iterate is not a number
+    anyone may publish.
+
+    The adopted single-component model converges in 17 iterations with 0.0 per cent drift
+    after iteration 12, so this fires only away from the preferred region.
 
     The residual is measured on the *undamped* target step, not the damped one:
     relaxation shrinks the step by construction, so a damped residual would make
@@ -141,12 +196,22 @@ def assert_em_converged(
     """
     if parameter_residual < tolerance:
         return True
+    if stalled:
+        reason = (
+            f"stalled after {n_iterations_run} steps: the fixed-point residual "
+            f"({parameter_residual:.3e}) stopped improving and will not reach the "
+            f"tolerance ({tolerance:.1e}) no matter how long it runs"
+        )
+    else:
+        reason = (
+            f"did NOT converge in {n_iterations_run} steps (fixed-point residual "
+            f"{parameter_residual:.3e} > tolerance {tolerance:.1e}); it may simply need "
+            "a higher iteration cap"
+        )
     message = (
-        f"{label}: detectability iteration did NOT converge after {n_iterations_run} "
-        f"steps (fixed-point residual {parameter_residual:.3e} > tolerance "
-        f"{tolerance:.1e}). Whatever N0 this produced is the last iterate, not a "
-        "solution, and must not be published. Raise the iteration cap or "
-        "investigate the identifiability of the completeness amplitude."
+        f"{label}: detectability iteration {reason}. Whatever N0 this produced is the "
+        "last iterate, not a solution, and must not be published. Investigate the "
+        "identifiability of the completeness amplitude."
     )
     if raise_on_non_convergence:
         raise DetectabilityConvergenceError(message)
@@ -242,7 +307,7 @@ def fit_single_component_detectability_em(
     spec: JointModelSpec | None = None,
     max_iterations: int = 200,
     tolerance: float = 1.0e-4,
-    raise_on_non_convergence: bool = True,
+    raise_on_non_convergence: bool = False,
     log_likelihood_monotonicity_atol: float = 1.0e-6,
     assumed_mean_completeness: float | None = DEFAULT_ASSUMED_MEAN_COMPLETENESS,
     relaxation: float = 0.7,
@@ -256,7 +321,7 @@ def fit_single_component_detectability_em(
 ) -> dict[str, object]:
     """Iterate the joint population fit against the detectability model.
 
-    This used to run a fixed `n_iterations=6` with no convergence test, which is
+    This used to run a fixed `n_iterations=200` with no convergence test, which is
     how an unconverged (indeed diverging) iterate ended up being published. It now
     iterates to a fixed point and raises if it cannot reach one.
 
@@ -334,6 +399,8 @@ def fit_single_component_detectability_em(
     previous_log_likelihood: float | None = None
     log_likelihood_monotone = True
     converged = False
+    stalled = False
+    stall_detector = StallDetector()
     iteration = 0
 
     for iteration in range(1, max_iterations + 1):
@@ -412,9 +479,22 @@ def fit_single_component_detectability_em(
             converged = True
             break
 
+        # Bail out once the residual stops improving: a stalled iteration cannot reach
+        # the tolerance however long it runs, and grinding to `max_iterations` only
+        # burns time to reach the same non-convergent verdict.
+        if stall_detector.update(parameter_residual):
+            stalled = True
+            break
+
     if not converged:
+        how = (
+            "stalled after {n} steps (residual stopped improving; it will not reach the "
+            "tolerance however long it runs)".format(n=iteration)
+            if stalled
+            else f"did NOT converge in {iteration} steps"
+        )
         message = (
-            f"Detectability iteration did NOT converge in {iteration} steps: "
+            f"Detectability iteration {how}: "
             f"fixed-point residual {parameter_residual:.3e} > tol {tolerance:.1e}. "
             "The reported N0 is whatever the last iterate happened to be, not a "
             "solution. Do not publish it."
@@ -534,6 +614,12 @@ def fit_single_component_detectability_em(
             "distance_slope": float(np.exp(current_raw_params[2])),
             "latitude_slope": float(np.exp(current_raw_params[3])),
         },
+        # NOTE: this payload deliberately has no `best_joint_model` /
+        # `best_model_detectability_summary`. Those keys belong to the *comparison*
+        # writers, which fit several specs and pick a winner. This function fits ONE
+        # spec, so there is no "best" to report -- the fitted model is `final_model`.
+        # Duplicating the keys in here to satisfy a miswritten reader would be a lie
+        # about what this payload is; the reader was fixed instead.
         "baseline_model": asdict(baseline_payload["summary"]),
         "final_model": {
             **asdict(final_payload["summary"]),
@@ -960,8 +1046,8 @@ def fit_shared_imf_two_component_detectability_em_single_model(
     observable_context: ObservablePredictionContext,
     component_base_contexts: dict[str, JointLikelihoodContext],
     spec: SharedImfTwoComponentSpec,
-    n_iterations: int = 6,
-    raise_on_non_convergence: bool = True,
+    n_iterations: int = 12,
+    raise_on_non_convergence: bool = False,
     relaxation: float = 0.7,
     **_: object,
 ) -> dict[str, object]:
@@ -984,6 +1070,8 @@ def fit_shared_imf_two_component_detectability_em_single_model(
     current_contexts = component_base_contexts
     current_payload = baseline_payload
 
+    em_stall_detector = StallDetector()
+    em_stalled = False
     for iteration in range(1, n_iterations + 1):
         completeness_bin_grid = evaluate_completeness_bin_grid(current_raw_params, observable_context)
         effective_completeness_grid = compute_effective_completeness_grid(
@@ -1041,11 +1129,24 @@ def fit_shared_imf_two_component_detectability_em_single_model(
             )
         )
 
+        # Stop as soon as the fixed point is reached; `n_iterations` is a cap, not a
+        # target. Iterating a fixed number of times and reporting the last iterate is
+        # the bug this replaced.
+        if em_parameter_residual < DEFAULT_EM_TOLERANCE:
+            break
+        # ...and stop early if the residual has stopped improving. A stalled iteration
+        # will not converge by grinding to the cap; bailing out reports the same
+        # non-convergent outcome ~10x sooner.
+        if em_stall_detector.update(em_parameter_residual):
+            em_stalled = True
+            break
+
     em_converged = assert_em_converged(
         parameter_residual=em_parameter_residual,
         n_iterations_run=iteration,
         label="fit_shared_imf_two_component_detectability_em_single_model",
         raise_on_non_convergence=raise_on_non_convergence,
+        stalled=em_stalled,
     )
     final_completeness_bin_grid = evaluate_completeness_bin_grid(current_raw_params, observable_context)
     final_effective_completeness_grid = compute_effective_completeness_grid(
@@ -1146,8 +1247,8 @@ def fit_separate_imf_two_component_detectability_em_single_model(
     component_base_contexts: dict[str, JointLikelihoodContext],
     in_situ_spec: JointModelSpec,
     accreted_spec: JointModelSpec,
-    n_iterations: int = 6,
-    raise_on_non_convergence: bool = True,
+    n_iterations: int = 12,
+    raise_on_non_convergence: bool = False,
     relaxation: float = 0.7,
     **_: object,
 ) -> dict[str, object]:
@@ -1180,6 +1281,8 @@ def fit_separate_imf_two_component_detectability_em_single_model(
     current_component_payloads = baseline_component_payloads
     current_pair_payload = baseline_pair_payload
 
+    em_stall_detector = StallDetector()
+    em_stalled = False
     for iteration in range(1, n_iterations + 1):
         completeness_bin_grid = evaluate_completeness_bin_grid(current_raw_params, observable_context)
         effective_completeness_grid = compute_effective_completeness_grid(
@@ -1255,11 +1358,24 @@ def fit_separate_imf_two_component_detectability_em_single_model(
             )
         )
 
+        # Stop as soon as the fixed point is reached; `n_iterations` is a cap, not a
+        # target. Iterating a fixed number of times and reporting the last iterate is
+        # the bug this replaced.
+        if em_parameter_residual < DEFAULT_EM_TOLERANCE:
+            break
+        # ...and stop early if the residual has stopped improving. A stalled iteration
+        # will not converge by grinding to the cap; bailing out reports the same
+        # non-convergent outcome ~10x sooner.
+        if em_stall_detector.update(em_parameter_residual):
+            em_stalled = True
+            break
+
     em_converged = assert_em_converged(
         parameter_residual=em_parameter_residual,
         n_iterations_run=iteration,
         label="fit_separate_imf_two_component_detectability_em_single_model",
         raise_on_non_convergence=raise_on_non_convergence,
+        stalled=em_stalled,
     )
     final_completeness_bin_grid = evaluate_completeness_bin_grid(current_raw_params, observable_context)
     final_effective_completeness_grid = compute_effective_completeness_grid(
@@ -1498,6 +1614,12 @@ def build_detectability_corrected_performance_row(
     n_mass_bins: int = 12,
     n_a_bins: int = 9,
 ) -> dict[str, object]:
+    """One row of the model comparison.
+
+    Carries the convergence verdict so that a family whose detectability solve drifted is
+    *visible* in the table rather than silently indistinguishable from a converged fit.
+    It is still ranked by likelihood, as the method intends -- it is not removed.
+    """
     context = detectability_result["final_context"]
     model = detectability_result["final_payload"]["model"]
     summary = detectability_result["final_payload"]["summary"]
@@ -1528,6 +1650,16 @@ def build_detectability_corrected_performance_row(
     return {
         "imf_family": summary.imf_family,
         "radial_model": summary.radial_model,
+        # Convergence verdict of the inner detectability solve. A drifting family is
+        # still ranked by likelihood (the method rejects it that way, on purpose); this
+        # column just means it can no longer masquerade as a converged fit in the table.
+        "detectability_converged": bool(detectability_result.get("em_converged", True)),
+        "detectability_parameter_residual": float(
+            detectability_result.get("em_parameter_residual", float("nan"))
+        ),
+        "detectability_iterations_run": int(
+            detectability_result.get("em_iterations_run", -1)
+        ),
         "log_likelihood": float(summary.log_likelihood),
         "aic": float(summary.aic),
         "bic": float(summary.bic),

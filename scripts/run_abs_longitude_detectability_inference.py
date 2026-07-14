@@ -79,23 +79,23 @@ def main() -> None:
     comparison_rows = [
         {
             "model_variant": "baseline_detectability",
-            "imf_family": baseline_detectability_summary["best_joint_model"]["imf_family"],
-            "radial_model": baseline_detectability_summary["best_joint_model"]["radial_model"],
-            "alpha_dndm": json.loads(baseline_detectability_summary["best_joint_model"]["imf_parameters_json"]).get(
+            "imf_family": baseline_detectability_summary["final_model"]["imf_family"],
+            "radial_model": baseline_detectability_summary["final_model"]["radial_model"],
+            "alpha_dndm": json.loads(baseline_detectability_summary["final_model"]["imf_parameters_json"]).get(
                 "alpha_dndm"
             ),
             "log10_m_c_msun": json.loads(
-                baseline_detectability_summary["best_joint_model"]["imf_parameters_json"]
+                baseline_detectability_summary["final_model"]["imf_parameters_json"]
             ).get("log10_m_c_msun"),
-            "total_initial_count": float(baseline_detectability_summary["best_joint_model"]["total_initial_count"]),
+            "total_initial_count": float(baseline_detectability_summary["final_model"]["total_initial_count"]),
             "selection_fraction": float(
-                baseline_detectability_summary["best_joint_model"]["selection_fraction"]
+                baseline_detectability_summary["final_model"]["selection_fraction"]
             ),
             "raw_survival_fraction": float(
-                baseline_detectability_summary["best_joint_model"]["raw_survival_fraction"]
+                baseline_detectability_summary["final_model"]["raw_survival_fraction"]
             ),
             "mean_detectability": float(
-                baseline_detectability_summary["best_model_detectability_summary"]["final_mean_detectability"]
+                baseline_detectability_summary["final_mean_detectability"]
             ),
             "total_initial_stellar_mass_msun": float(baseline_key_row["total_initial_stellar_mass_msun"]),
         },

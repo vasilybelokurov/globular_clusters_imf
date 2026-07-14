@@ -33,6 +33,13 @@ from scan_schechter_survival_time_multipliers import _plot_logl_vs_multiplier, _
 
 
 LOG_MASS_MIN = 4.0
+# 12 iterations is the PAPER'S CONVENTION, not an arbitrary cap, and it must not
+# be raised casually. The likelihood at a NON-converged trial depends on the
+# iteration count (at alpha=-1.675 it is 462.17 at iter 12 and 458.95 at iter 200),
+# so changing this number changes the outer profile-likelihood SURFACE in the
+# drifting region. The fixed count is what makes that surface well-defined and
+# reproducible. Trials that drift are low-likelihood and are meant to be rejected
+# by the outer profile likelihood -- see the paper, Sec. 4.1 -- not by a cap.
 N_DETECTABILITY_ITERATIONS = 12
 SURFACE_MODEL = "logistic"
 

@@ -195,7 +195,7 @@ def main() -> None:
                 prepared,
                 project_root=output_root,
                 spec=spec,
-                n_iterations=12,
+                n_iterations=200,
                 start_completeness_raw_parameters=st["completeness"],
                 start_radial_params=st["radial"],
                 survival_grid_override=override,

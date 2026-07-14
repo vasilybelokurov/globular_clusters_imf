@@ -55,6 +55,8 @@ from globular_clusters_imf.paper_assets import (  # noqa: E402
 from globular_clusters_imf.plotting import centers_to_edges, rebin_expected_counts_2d  # noqa: E402
 from globular_clusters_imf.smooth_survivability import build_smooth_survivability_grid  # noqa: E402
 from run_profile_map_and_exact_mcmc_schechter_powerlaw_a import _corner_plot  # noqa: E402
+from globular_clusters_imf.paper_assets import _parse_providecommand
+from globular_clusters_imf.paper_summary import merge_latex_macros, merge_paper_results_summary
 
 
 LOGPOLY3_VARIANT = "profile_map_and_exact_mcmc_schechter_logpoly3_logistic_global_monotonic_q"
@@ -1156,7 +1158,15 @@ def _write_paper_numbers_tex(
         rf"\providecommand{{\CoredPowerLawACoreKpcMinus}}{{{cored_core_q50 - cored_core_q16:.2f}}}",
         rf"\providecommand{{\CoredPowerLawACoreKpcPlus}}{{{cored_core_q84 - cored_core_q50:.2f}}}",
     ]
-    output_path.write_text("\n".join(lines) + "\n")
+    # MERGE, never clobber -- three other scripts contribute different macros here.
+    merge_latex_macros(
+        output_path,
+        dict(
+            entry
+            for entry in (_parse_providecommand(line) for line in lines)
+            if entry[0] is not None
+        ),
+    )
 
 
 def main() -> None:
@@ -1233,7 +1243,7 @@ def main() -> None:
                 fit_catalog,
                 project_root=PROJECT_ROOT,
                 spec=JointModelSpec(imf_family="schechter", radial_model="logpoly3"),
-                n_iterations=30,
+                n_iterations=200,
                 fixed_imf_params=np.array([alpha, log_mc], dtype=float),
                 survival_grid_override=illustrative_iteration_survivability_map,
             )
@@ -1310,7 +1320,7 @@ def main() -> None:
         "single_component_exact_cored_powerlaw_a": cored_powerlaw_bundle.best_summary,
         "single_component_posterior_summary": logpoly3_bundle.posterior_summary.to_dict(orient="records"),
     }
-    (tables_dir / "paper_results_summary.json").write_text(json.dumps(summary_payload, indent=2))
+    merge_paper_results_summary(tables_dir, summary_payload)
 
     manifest = {
         "figure1_overview": str(figures_dir / "catalog_mass_semimajor_axis_overview.pdf"),

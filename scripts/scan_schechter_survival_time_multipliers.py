@@ -358,7 +358,7 @@ def main() -> None:
                 prepared_catalog,
                 project_root=output_root,
                 spec=spec,
-                n_iterations=12,
+                n_iterations=200,
                 start_completeness_raw_parameters=state["completeness"],
                 start_radial_params=state["radial"],
                 survival_grid_override=survival_grid_override,

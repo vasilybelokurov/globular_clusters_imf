@@ -154,7 +154,9 @@ def main() -> None:
         fit_fixed_survival_joint_models,
     )
     from globular_clusters_imf.model import fit_catalog_models
+    from globular_clusters_imf.paper_summary import require_paper_summary_keys
     from globular_clusters_imf.paper_assets import (
+        normalize_legacy_fraction_columns,
         PAPER_LOG_MASS_MIN,
         best_single_model_total_initial_count,
         best_single_model_total_initial_stellar_mass,
@@ -388,7 +390,7 @@ def main() -> None:
     write_single_component_table_tex(single_component_table, tables_dir / "single_component_model_comparison.tex")
 
     key_results_path = tables_dir / "key_results_summary.csv"
-    key_results_table = pd.read_csv(key_results_path)
+    key_results_table = normalize_legacy_fraction_columns(pd.read_csv(key_results_path))
     single_row_mask = (
         key_results_table["model"] == "Detectability-corrected single component"
     ) & (key_results_table["component"] == "all")
@@ -410,7 +412,7 @@ def main() -> None:
     key_results_table.loc[single_row_mask, "total_initial_count"] = float(
         detectability_corrected_single_total_initial_count(detectability_result)
     )
-    key_results_table.loc[single_row_mask, "survival_fraction"] = float(
+    key_results_table.loc[single_row_mask, "selection_fraction"] = float(
         detectability_result["final_payload"]["model"]["selection_fraction"]
     )
     key_results_table.loc[single_row_mask, "total_initial_stellar_mass_msun"] = float(
@@ -421,6 +423,7 @@ def main() -> None:
 
     paper_summary_path = tables_dir / "paper_results_summary.json"
     paper_summary = json.loads(paper_summary_path.read_text())
+    require_paper_summary_keys(paper_summary, "single_component_best_model")
     paper_summary["single_component_best_model"]["total_initial_count"] = float(
         best_single_model_total_initial_count(joint_results)
     )
