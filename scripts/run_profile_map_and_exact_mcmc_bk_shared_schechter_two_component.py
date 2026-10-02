@@ -338,6 +338,7 @@ def _fit_shared_schechter_two_component_detectability_em_fixed_imf_with_abs_long
         current_raw_params = np.asarray(start_completeness_raw_parameters, dtype=float).copy()
 
     iteration_rows = []
+    last_parameter_residual = float("nan")
     current_payload = baseline_payload
     current_contexts = component_base_contexts
     current_radial_state = current_payload["radial_parameters_raw"]
@@ -373,6 +374,8 @@ def _fit_shared_schechter_two_component_detectability_em_fixed_imf_with_abs_long
             start_params=current_raw_params,
         )
         target_raw_params = completeness_fit["raw_parameters"]
+        # Undamped fixed-point residual, recorded (not acted on): the iteration count is fixed.
+        last_parameter_residual = float(np.max(np.abs(np.asarray(target_raw_params) - current_raw_params)))
         current_raw_params = (1.0 - float(relaxation)) * current_raw_params + float(relaxation) * target_raw_params
         updated_completeness_bin_grid = evaluate_completeness_bin_grid_with_abs_longitude(current_raw_params, observable_context)
         predicted_observed_counts = predicted_complete_counts * updated_completeness_bin_grid
@@ -505,6 +508,9 @@ def _fit_shared_schechter_two_component_detectability_em_fixed_imf_with_abs_long
         "final_predicted_complete_counts": final_predicted_complete_counts,
         "final_predicted_observed_counts": final_predicted_observed_counts,
         "summary_payload": summary_payload,
+        "em_parameter_residual": float(last_parameter_residual),
+        "em_converged": bool(np.isfinite(last_parameter_residual) and last_parameter_residual < 1.0e-4),
+        "em_iterations_run": int(n_iterations),
     }
 
 
@@ -713,6 +719,17 @@ def _evaluate_theta_single_start(
         log_mass_min=LOG_MASS_MIN,
     )
     row.update(metadata)
+    # Change of variables for backends whose catalogue M_ini move with eta_t (GG23); zero
+    # for the Baumgardt backend. See run_profile_map_and_exact_mcmc_schechter_powerlaw_a.py.
+    row["intrinsic_log_likelihood"] = float(row["log_likelihood"])
+    log_jacobian = float(metadata.get("log_jacobian_present_to_initial", 0.0))
+    row["log_likelihood"] = float(row["intrinsic_log_likelihood"] + log_jacobian)
+    for key in ("aic", "bic"):
+        if key in row and row[key] is not None:
+            row[key] = float(row[key] - 2.0 * log_jacobian)
+    row["detectability_converged"] = bool(result["em_converged"])
+    row["detectability_iterations_run"] = int(result["em_iterations_run"])
+    row["detectability_parameter_residual"] = float(result["em_parameter_residual"])
     return {
         "theta": np.asarray(theta, dtype=float),
         "log_posterior": float(row["log_likelihood"]),
@@ -773,6 +790,24 @@ def _evaluate_theta_multistart(
         }
     best_entry["row"]["stage"] = stage
     return best_entry
+
+
+def _evaluate_theta_worker(kwargs: dict[str, object]) -> dict[str, object]:
+    return _evaluate_theta_multistart(**kwargs)
+
+
+def _evaluate_thetas(jobs: list[dict[str, object]], *, n_workers: int) -> list[dict[str, object]]:
+    """Grid evaluations in job order; parallel results equal the serial loop's."""
+    if n_workers <= 1 or len(jobs) <= 1:
+        return [_evaluate_theta_multistart(**job) for job in jobs]
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+
+    results: list[dict[str, object] | None] = [None] * len(jobs)
+    with ProcessPoolExecutor(max_workers=n_workers) as executor:
+        futures = {executor.submit(_evaluate_theta_worker, job): index for index, job in enumerate(jobs)}
+        for future in as_completed(futures):
+            results[futures[future]] = future.result()
+    return [result for result in results if result is not None]
 
 
 def _within_bounds(theta: np.ndarray, bounds: np.ndarray) -> bool:
@@ -964,6 +999,10 @@ def main() -> None:
     parser.add_argument("--detectability-relaxation", type=float, default=0.7)
     parser.add_argument("--survivability-backend", choices=["baumgardt", "gg23"], default="baumgardt")
     parser.add_argument("--gg23-model", default="")
+    parser.add_argument("--prior-eta", type=str, default="", help="lo,hi uniform prior; default = refined-grid extent")
+    parser.add_argument("--prior-alpha", type=str, default="", help="lo,hi")
+    parser.add_argument("--prior-logmc", type=str, default="", help="lo,hi")
+    parser.add_argument("--grid-workers", type=int, default=1)
     parser.add_argument("--chain-worker-config")
     parser.add_argument("--chain-worker-output")
     args = parser.parse_args()
@@ -981,6 +1020,7 @@ def main() -> None:
     worker_dir.mkdir(parents=True, exist_ok=True)
 
     from globular_clusters_imf.model import fit_catalog_models
+    from globular_clusters_imf.provenance import provenance_stamp
     from globular_clusters_imf.two_component_model import SharedImfTwoComponentSpec
 
     catalog = _load_catalog()
@@ -1012,34 +1052,37 @@ def main() -> None:
     )
 
     evaluation_cache: dict[tuple[float, float, float], dict[str, object]] = {}
+    common = dict(
+        prepared_catalog=prepared_catalog,
+        spec=spec,
+        project_root=output_root,
+        n_detectability_iterations=int(args.n_detectability_iterations),
+        relaxation=float(args.detectability_relaxation),
+        survivability_backend=str(args.survivability_backend),
+        gg23_model_name=str(args.gg23_model) or None,
+    )
+    coarse_thetas = [
+        np.array([eta_t, alpha, log_mc], dtype=float)
+        for eta_t in coarse_spec.eta_grid()
+        for log_mc in coarse_spec.logmc_grid()
+        for alpha in coarse_spec.alpha_grid()
+    ]
+    pending = {}
+    for theta in coarse_thetas:
+        key = _round_key(theta)
+        if key not in evaluation_cache and key not in pending:
+            pending[key] = dict(common, theta=theta, stage="coarse", anchor_start_state=None)
+    for key, entry in zip(pending, _evaluate_thetas(list(pending.values()), n_workers=int(args.grid_workers)), strict=True):
+        evaluation_cache[key] = entry
     coarse_entries: list[dict[str, object]] = []
-    for eta_t in coarse_spec.eta_grid():
-        for log_mc in coarse_spec.logmc_grid():
-            for alpha in coarse_spec.alpha_grid():
-                theta = np.array([eta_t, alpha, log_mc], dtype=float)
-                key = _round_key(theta)
-                if key in evaluation_cache:
-                    entry = _entry_stage_copy(evaluation_cache[key], stage="coarse")
-                else:
-                    entry = _evaluate_theta_multistart(
-                        prepared_catalog=prepared_catalog,
-                        spec=spec,
-                        theta=theta,
-                        stage="coarse",
-                        project_root=output_root,
-                        anchor_start_state=None,
-                        n_detectability_iterations=int(args.n_detectability_iterations),
-                        relaxation=float(args.detectability_relaxation),
-                        survivability_backend=str(args.survivability_backend),
-                        gg23_model_name=str(args.gg23_model) or None,
-                    )
-                    evaluation_cache[key] = entry
-                coarse_entries.append(entry)
-                print(
-                    f"[coarse] eta_t={eta_t:.3f} alpha={alpha:.3f} logMc={log_mc:.3f} "
-                    f"logL={float(entry['row']['log_likelihood']):.3f} "
-                    f"N0>1e4={float(entry['row']['final_total_initial_count_above_log10_4']):.1f}"
-                )
+    for theta in coarse_thetas:
+        entry = _entry_stage_copy(evaluation_cache[_round_key(theta)], stage="coarse")
+        coarse_entries.append(entry)
+        print(
+            f"[coarse] eta_t={theta[0]:.3f} alpha={theta[1]:.3f} logMc={theta[2]:.3f} "
+            f"logL={float(entry['row']['log_likelihood']):.3f} "
+            f"N0>1e4={float(entry['row']['final_total_initial_count_above_log10_4']):.1f}"
+        )
 
     coarse_table = pd.DataFrame([entry["row"] for entry in coarse_entries]).sort_values(
         ["eta_t", "input_alpha_dndm", "input_log10_m_c_msun"]
@@ -1091,35 +1134,34 @@ def main() -> None:
             refined_successes,
             k=max(int(args.anchor_k), int(args.mcmc_chains)),
         )
+        stage_name = f"refined_pass_{pass_index + 1}"
+        refined_thetas = [
+            np.array([eta_t, alpha, log_mc], dtype=float)
+            for eta_t in refined_spec.eta_grid()
+            for log_mc in refined_spec.logmc_grid()
+            for alpha in refined_spec.alpha_grid()
+        ]
+        pending = {}
+        for theta in refined_thetas:
+            key = _round_key(theta)
+            if key not in evaluation_cache and key not in pending:
+                pending[key] = dict(
+                    common,
+                    theta=theta,
+                    stage=stage_name,
+                    anchor_start_state=_select_anchor_start_state(theta=theta, anchors=anchor_entries, bounds=refined_bounds),
+                )
+        for key, entry in zip(pending, _evaluate_thetas(list(pending.values()), n_workers=int(args.grid_workers)), strict=True):
+            evaluation_cache[key] = entry
         current_entries: list[dict[str, object]] = []
-        for eta_t in refined_spec.eta_grid():
-            for log_mc in refined_spec.logmc_grid():
-                for alpha in refined_spec.alpha_grid():
-                    theta = np.array([eta_t, alpha, log_mc], dtype=float)
-                    key = _round_key(theta)
-                    if key in evaluation_cache:
-                        entry = _entry_stage_copy(evaluation_cache[key], stage=f"refined_pass_{pass_index + 1}")
-                    else:
-                        anchor_state = _select_anchor_start_state(theta=theta, anchors=anchor_entries, bounds=refined_bounds)
-                        entry = _evaluate_theta_multistart(
-                            prepared_catalog=prepared_catalog,
-                            spec=spec,
-                            theta=theta,
-                            stage=f"refined_pass_{pass_index + 1}",
-                            project_root=output_root,
-                            anchor_start_state=anchor_state,
-                            n_detectability_iterations=int(args.n_detectability_iterations),
-                            relaxation=float(args.detectability_relaxation),
-                            survivability_backend=str(args.survivability_backend),
-                            gg23_model_name=str(args.gg23_model) or None,
-                        )
-                        evaluation_cache[key] = entry
-                    current_entries.append(entry)
-                    print(
-                        f"[refined {pass_index + 1}] eta_t={eta_t:.3f} alpha={alpha:.3f} logMc={log_mc:.3f} "
-                        f"logL={float(entry['row']['log_likelihood']):.3f} "
-                        f"N0>1e4={float(entry['row']['final_total_initial_count_above_log10_4']):.1f}"
-                    )
+        for theta in refined_thetas:
+            entry = _entry_stage_copy(evaluation_cache[_round_key(theta)], stage=stage_name)
+            current_entries.append(entry)
+            print(
+                f"[refined {pass_index + 1}] eta_t={theta[0]:.3f} alpha={theta[1]:.3f} logMc={theta[2]:.3f} "
+                f"logL={float(entry['row']['log_likelihood']):.3f} "
+                f"N0>1e4={float(entry['row']['final_total_initial_count_above_log10_4']):.1f}"
+            )
 
         current_table = pd.DataFrame([entry["row"] for entry in current_entries]).sort_values(
             ["eta_t", "input_alpha_dndm", "input_log10_m_c_msun"]
@@ -1163,6 +1205,7 @@ def main() -> None:
 
     if bool(args.skip_mcmc):
         summary_payload = {
+            "provenance": provenance_stamp([PROJECT_ROOT / "data" / "processed" / "baumgardt_gc_catalog_with_origin_flags.csv"]),
             "surface_model": SURFACE_MODEL,
             "model_spec": {
                 "model_class": "bk_shared_schechter_two_component",
@@ -1200,6 +1243,14 @@ def main() -> None:
         ],
         dtype=float,
     )
+    prior_source = "refined_grid_extent"
+    for index, text in enumerate([args.prior_eta, args.prior_alpha, args.prior_logmc]):
+        if text:
+            lo, hi = (float(value) for value in text.split(","))
+            if not lo <= hi:
+                raise ValueError(f"Invalid prior bounds {text!r}")
+            refined_bounds[index] = [lo, hi]
+            prior_source = "command_line"
     fixed_anchor_library = _build_anchor_library(
         coarse_successes,
         refined_successes,
@@ -1354,6 +1405,7 @@ def main() -> None:
     _save_best_payload(best_entry, tables_dir, prefix="exact_parallel_mcmc")
 
     summary = {
+        "provenance": provenance_stamp([PROJECT_ROOT / "data" / "processed" / "baumgardt_gc_catalog_with_origin_flags.csv"]),
         "source_output_root_name": args.output_root_name,
         "output_root_name": args.output_root_name,
         "surface_model": SURFACE_MODEL,
@@ -1379,6 +1431,8 @@ def main() -> None:
         "worker_cache_sizes": {str(result["chain_id"]): int(result["cache_size"]) for result in chain_results},
         "anchor_count": int(len(fixed_anchor_library)),
         "refined_bounds": refined_bounds.tolist(),
+        "prior_bounds": {"eta_t": refined_bounds[0].tolist(), "alpha_dndm": refined_bounds[1].tolist(),
+                         "log10_m_c_msun": refined_bounds[2].tolist(), "source": prior_source},
     }
     (tables_dir / "exact_parallel_mcmc_summary.json").write_text(json.dumps(summary, indent=2))
 
