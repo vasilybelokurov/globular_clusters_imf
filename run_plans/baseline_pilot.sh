@@ -15,6 +15,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 PYTHON="${PYTHON:-.venv/bin/python}"
+# One BLAS/OpenMP thread per process: the grid and chain workers already use the cores,
+# and numpy's default thread pool per worker oversubscribed the machine (load ~150 on 14).
+export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 NUMEXPR_NUM_THREADS=1
 TAG="baseline_2026-10"
 GRID_WORKERS="${GRID_WORKERS:-6}"
 CHAINS="${CHAINS:-7}"
