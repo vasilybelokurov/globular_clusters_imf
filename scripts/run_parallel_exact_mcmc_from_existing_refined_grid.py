@@ -206,7 +206,8 @@ def main() -> None:
     for index, text in enumerate([args.prior_eta, args.prior_alpha, args.prior_logmc]):
         if text:
             lo, hi = (float(value) for value in text.split(','))
-            if not lo < hi:
+            # lo == hi fixes the parameter (zero proposal width); lo > hi is an error.
+            if not lo <= hi:
                 raise ValueError(f'Invalid prior bounds {text!r}')
             refined_bounds[index] = [lo, hi]
             prior_source = 'command_line'
@@ -356,6 +357,8 @@ def main() -> None:
         if column not in post_burn.columns:
             continue
         stacked = np.array([frame[column].to_numpy(dtype=float) for _, frame in post_burn.groupby('chain')])
+        if np.ptp(stacked) == 0.0:
+            continue  # parameter held fixed: no convergence statistic is defined
         convergence[column] = {
             'split_rhat': compute_split_rhat(stacked),
             'ess': effective_sample_size(stacked),
@@ -364,6 +367,8 @@ def main() -> None:
     for index, column in enumerate(['eta_t', 'input_alpha_dndm', 'input_log10_m_c_msun']):
         values = posterior_table[column].to_numpy(dtype=float)
         lo, hi = refined_bounds[index]
+        if hi == lo:
+            continue
         margin = 0.02 * (hi - lo)
         prior_edge_fraction[column] = {
             'below_lo_plus_2pc': float(np.mean(values < lo + margin)),
