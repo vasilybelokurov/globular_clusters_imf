@@ -160,6 +160,9 @@ def _catalog_and_survival_grid_for_theta(
             "gg23_model_name": "",
             "gg23_model_label": "",
             "gg23_mini_eta_t_dependent": False,
+            "gg23_mass_definition": "",
+            "n_clusters_used": int(len(prepared_catalog)),
+            "log_jacobian_present_to_initial": 0.0,
             "max_abs_present_mass_residual_fraction": np.nan,
         }
         return prepared_catalog, smooth_survival, metadata
@@ -171,7 +174,9 @@ def _catalog_and_survival_grid_for_theta(
 
     from globular_clusters_imf.gg23_survivability import (
         GG23_MODELS,
+        GG23_STELLAR_EVOLUTION_MASS_FRACTION,
         build_gg23_survivability_grid,
+        gg23_dlog_initial_dlog_present,
         effective_radius_kpc_from_semimajor_axis,
         gg23_initial_mass_from_present_msun,
         gg23_present_mass_msun,
@@ -211,22 +216,38 @@ def _catalog_and_survival_grid_for_theta(
         age_gyr=AGE_GYR,
         eta_t=float(eta_t),
     )
+    # d ln M_ini / d ln M_now per cluster: the catalogue coordinates move with eta_t, so
+    # the likelihood of the observed present-day masses needs this change of variables.
+    dlog_initial_dlog_present = gg23_dlog_initial_dlog_present(
+        gg23_initial_mass,
+        effective_radius,
+        model,
+        gradient_radius_kpc=semi_major_axis,
+        age_gyr=AGE_GYR,
+        eta_t=float(eta_t),
+    )
+    # GG23 M_i is the post-stellar-evolution mass; convert to birth mass (GG23 eq. 2) so the
+    # IMF, N0 and M_c live on the same axis as the Baumgardt backend.
+    gg23_initial_mass = gg23_initial_mass / GG23_STELLAR_EVOLUTION_MASS_FRACTION
+    survival_cut = survival_cut / GG23_STELLAR_EVOLUTION_MASS_FRACTION
     valid = (
         np.isfinite(gg23_initial_mass)
         & np.isfinite(survival_cut)
         & (gg23_initial_mass > 0.0)
         & (survival_cut > 0.0)
+        & np.isfinite(dlog_initial_dlog_present)
+        & (dlog_initial_dlog_present > 0.0)
         & np.isfinite(semi_major_axis)
         & (semi_major_axis > 0.0)
     )
     if not np.all(valid):
-        working = working.loc[valid].copy()
-        semi_major_axis = semi_major_axis[valid]
-        present_mass = present_mass[valid]
-        effective_radius = effective_radius[valid]
-        gg23_initial_mass = gg23_initial_mass[valid]
-        reconstructed_present_mass = reconstructed_present_mass[valid]
-        survival_cut = survival_cut[valid]
+        # Dropping clusters would change the data set with eta_t and make likelihoods at
+        # different eta_t incomparable. An observed cluster with no valid initial mass is
+        # impossible under this law at this eta_t, so the trial is rejected outright.
+        raise ValueError(
+            f"GG23 {gg23_model_name} at eta_t={float(eta_t):.4f}: "
+            f"{int(np.sum(~valid))} observed clusters have no valid initial mass"
+        )
 
     working["baumgardt_initial_mass_msun"] = working["initial_mass_msun"].to_numpy(dtype=float)
     working["baumgardt_log_initial_mass_msun"] = working["log_initial_mass_msun"].to_numpy(dtype=float)
@@ -253,6 +274,9 @@ def _catalog_and_survival_grid_for_theta(
         "gg23_model_name": gg23_model_name,
         "gg23_model_label": model.label,
         "gg23_mini_eta_t_dependent": True,
+        "gg23_mass_definition": "birth (M_i / mu_sev)",
+        "n_clusters_used": int(len(working)),
+        "log_jacobian_present_to_initial": float(np.sum(np.log(dlog_initial_dlog_present))),
         "max_abs_present_mass_residual_fraction": float(
             np.nanmax(np.abs(working["gg23_present_mass_residual_fraction"].to_numpy(dtype=float)))
         ),
@@ -305,6 +329,17 @@ def _evaluate_theta_single_start(
     row["input_log10_m_c_msun"] = log_mc
     row["surface_model"] = SURFACE_MODEL
     row.update(metadata)
+    # Outer likelihood of the observed catalogue. For the GG23 backend the catalogue M_ini
+    # are recomputed from M_now at every eta_t, so the change-of-variables term is added
+    # here; it is constant at fixed eta_t, so the inner profiling is unaffected.
+    row["intrinsic_log_likelihood"] = float(row["log_likelihood"])
+    log_jacobian = float(metadata["log_jacobian_present_to_initial"])
+    row["log_likelihood"] = float(row["intrinsic_log_likelihood"] + log_jacobian)
+    row["aic"] = float(row["aic"] - 2.0 * log_jacobian)
+    row["bic"] = float(row["bic"] - 2.0 * log_jacobian)
+    row["detectability_converged"] = bool(result.get("em_converged", False))
+    row["detectability_iterations_run"] = int(result.get("em_iterations_run", -1))
+    row["detectability_parameter_residual"] = float(result.get("em_parameter_residual", np.nan))
     row["status"] = "ok"
     row["failure_message"] = ""
     return {
@@ -387,6 +422,32 @@ def _evaluate_theta_multistart(
 
     best_entry["row"]["stage"] = stage
     return best_entry
+
+
+def _evaluate_theta_worker(kwargs: dict[str, object]) -> dict[str, object]:
+    for variable in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
+        os.environ.setdefault(variable, "1")
+    return _evaluate_theta_multistart(**kwargs)
+
+
+def _evaluate_thetas(
+    jobs: list[dict[str, object]],
+    *,
+    n_workers: int,
+) -> list[dict[str, object]]:
+    """Evaluate grid points, in parallel when n_workers > 1, returning results in job order.
+
+    Each evaluation depends only on its own theta and its fixed warm-start state (the
+    geometry RNG is seeded), so the parallel result is identical to the serial loop.
+    """
+    if n_workers <= 1 or len(jobs) <= 1:
+        return [_evaluate_theta_multistart(**job) for job in jobs]
+    results: list[dict[str, object] | None] = [None] * len(jobs)
+    with ProcessPoolExecutor(max_workers=n_workers) as executor:
+        futures = {executor.submit(_evaluate_theta_worker, job): index for index, job in enumerate(jobs)}
+        for future in as_completed(futures):
+            results[futures[future]] = future.result()
+    return [result for result in results if result is not None]
 
 
 def _entry_stage_copy(entry: dict[str, object], stage: str) -> dict[str, object]:
@@ -954,6 +1015,7 @@ def main() -> None:
     parser.add_argument("--skip-mcmc", action="store_true")
     parser.add_argument("--mcmc-chains", type=int, default=6)
     parser.add_argument("--mcmc-workers", type=int, default=0)
+    parser.add_argument("--grid-workers", type=int, default=1, help="processes for the coarse/refined grid scans")
     parser.add_argument("--mcmc-steps", type=int, default=260)
     parser.add_argument("--mcmc-burn", type=int, default=80)
     parser.add_argument("--mcmc-thin", type=int, default=2)
@@ -974,6 +1036,7 @@ def main() -> None:
 
     from globular_clusters_imf.joint_model import JointModelSpec
     from globular_clusters_imf.model import fit_catalog_models
+    from globular_clusters_imf.provenance import provenance_stamp
 
     rng = np.random.default_rng(20260527)
     spec = JointModelSpec(imf_family="schechter", radial_model=str(args.radial_model))
@@ -1008,32 +1071,37 @@ def main() -> None:
     )
 
     evaluation_cache: dict[tuple[float, float, float], dict[str, object]] = {}
+    coarse_thetas = [
+        np.array([eta_t, alpha, log_mc], dtype=float)
+        for eta_t in coarse_eta
+        for log_mc in coarse_logmc
+        for alpha in coarse_alpha
+    ]
+    pending = {}
+    for theta in coarse_thetas:
+        key = _round_key(theta)
+        if key not in evaluation_cache and key not in pending:
+            pending[key] = dict(
+                prepared_catalog=prepared_catalog,
+                spec=spec,
+                theta=theta,
+                stage="coarse",
+                project_root=output_root,
+                anchor_start_state=None,
+                survivability_backend=str(args.survivability_backend),
+                gg23_model_name=str(args.gg23_model) or None,
+            )
+    for key, entry in zip(pending, _evaluate_thetas(list(pending.values()), n_workers=int(args.grid_workers)), strict=True):
+        evaluation_cache[key] = entry
     coarse_entries: list[dict[str, object]] = []
-    for eta_t in coarse_eta:
-        for log_mc in coarse_logmc:
-            for alpha in coarse_alpha:
-                theta = np.array([eta_t, alpha, log_mc], dtype=float)
-                key = _round_key(theta)
-                if key in evaluation_cache:
-                    entry = _entry_stage_copy(evaluation_cache[key], stage="coarse")
-                else:
-                    entry = _evaluate_theta_multistart(
-                        prepared_catalog=prepared_catalog,
-                        spec=spec,
-                        theta=theta,
-                        stage="coarse",
-                        project_root=output_root,
-                        anchor_start_state=None,
-                        survivability_backend=str(args.survivability_backend),
-                        gg23_model_name=str(args.gg23_model) or None,
-                    )
-                    evaluation_cache[key] = entry
-                coarse_entries.append(entry)
-                print(
-                    f"[coarse] eta_t={eta_t:.3f} alpha={alpha:.3f} logMc={log_mc:.3f} "
-                    f"logL={float(entry['row']['log_likelihood']):.3f} gamma_a={float(entry['row']['gamma_linear_a']):.3f} "
-                    f"N0>1e4={float(entry['row']['final_total_initial_count_above_log10_4']):.1f}"
-                )
+    for theta in coarse_thetas:
+        entry = _entry_stage_copy(evaluation_cache[_round_key(theta)], stage="coarse")
+        coarse_entries.append(entry)
+        print(
+            f"[coarse] eta_t={theta[0]:.3f} alpha={theta[1]:.3f} logMc={theta[2]:.3f} "
+            f"logL={float(entry['row']['log_likelihood']):.3f} gamma_a={float(entry['row']['gamma_linear_a']):.3f} "
+            f"N0>1e4={float(entry['row']['final_total_initial_count_above_log10_4']):.1f}"
+        )
 
     coarse_table = pd.DataFrame([entry["row"] for entry in coarse_entries]).sort_values(
         ["eta_t", "input_alpha_dndm", "input_log10_m_c_msun"]
@@ -1083,33 +1151,38 @@ def main() -> None:
             refined_successes,
             k=max(int(args.anchor_k), int(args.mcmc_chains)),
         )
+        stage_name = f"refined_pass_{pass_index + 1}"
+        refined_thetas = [
+            np.array([eta_t, alpha, log_mc], dtype=float)
+            for eta_t in refined_spec.eta_grid()
+            for log_mc in refined_spec.logmc_grid()
+            for alpha in refined_spec.alpha_grid()
+        ]
+        pending = {}
+        for theta in refined_thetas:
+            key = _round_key(theta)
+            if key not in evaluation_cache and key not in pending:
+                pending[key] = dict(
+                    prepared_catalog=prepared_catalog,
+                    spec=spec,
+                    theta=theta,
+                    stage=stage_name,
+                    project_root=output_root,
+                    anchor_start_state=_select_anchor_start_state(theta=theta, anchors=anchor_entries, bounds=refined_bounds),
+                    survivability_backend=str(args.survivability_backend),
+                    gg23_model_name=str(args.gg23_model) or None,
+                )
+        for key, entry in zip(pending, _evaluate_thetas(list(pending.values()), n_workers=int(args.grid_workers)), strict=True):
+            evaluation_cache[key] = entry
         current_entries: list[dict[str, object]] = []
-        for eta_t in refined_spec.eta_grid():
-            for log_mc in refined_spec.logmc_grid():
-                for alpha in refined_spec.alpha_grid():
-                    theta = np.array([eta_t, alpha, log_mc], dtype=float)
-                    key = _round_key(theta)
-                    if key in evaluation_cache:
-                        entry = _entry_stage_copy(evaluation_cache[key], stage=f"refined_pass_{pass_index + 1}")
-                    else:
-                        anchor_state = _select_anchor_start_state(theta=theta, anchors=anchor_entries, bounds=refined_bounds)
-                        entry = _evaluate_theta_multistart(
-                            prepared_catalog=prepared_catalog,
-                            spec=spec,
-                            theta=theta,
-                            stage=f"refined_pass_{pass_index + 1}",
-                            project_root=output_root,
-                            anchor_start_state=anchor_state,
-                            survivability_backend=str(args.survivability_backend),
-                            gg23_model_name=str(args.gg23_model) or None,
-                        )
-                        evaluation_cache[key] = entry
-                    current_entries.append(entry)
-                    print(
-                        f"[refined {pass_index + 1}] eta_t={eta_t:.3f} alpha={alpha:.3f} logMc={log_mc:.3f} "
-                        f"logL={float(entry['row']['log_likelihood']):.3f} gamma_a={float(entry['row']['gamma_linear_a']):.3f} "
-                        f"N0>1e4={float(entry['row']['final_total_initial_count_above_log10_4']):.1f}"
-                    )
+        for theta in refined_thetas:
+            entry = _entry_stage_copy(evaluation_cache[_round_key(theta)], stage=stage_name)
+            current_entries.append(entry)
+            print(
+                f"[refined {pass_index + 1}] eta_t={theta[0]:.3f} alpha={theta[1]:.3f} logMc={theta[2]:.3f} "
+                f"logL={float(entry['row']['log_likelihood']):.3f} gamma_a={float(entry['row']['gamma_linear_a']):.3f} "
+                f"N0>1e4={float(entry['row']['final_total_initial_count_above_log10_4']):.1f}"
+            )
 
         current_table = pd.DataFrame([entry["row"] for entry in current_entries]).sort_values(
             ["eta_t", "input_alpha_dndm", "input_log10_m_c_msun"]
@@ -1153,6 +1226,7 @@ def main() -> None:
 
     if bool(args.skip_mcmc):
         summary_payload = {
+            "provenance": provenance_stamp([catalog_path]),
             "surface_model": SURFACE_MODEL,
             "survivability_backend": str(args.survivability_backend),
             "gg23_model_name": str(args.gg23_model),
@@ -1337,6 +1411,7 @@ def main() -> None:
     _save_best_payload(best_mcmc_entry, tables_dir, prefix="mcmc")
 
     summary_payload = {
+        "provenance": provenance_stamp([catalog_path]),
         "surface_model": SURFACE_MODEL,
         "survivability_backend": str(args.survivability_backend),
         "gg23_model_name": str(args.gg23_model),

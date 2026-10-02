@@ -292,22 +292,39 @@ def fit_monotonic_soft_survivability_model(
             + occupancy_weight * occupancy_penalty
         )
 
+    # The widths were previously capped at 1.2 dex, and the transition band sat on that cap
+    # at every eta_t (the unconstrained optimum is ~1.3 dex). The objective also contains a
+    # piecewise-constant occupancy term, which makes L-BFGS-B line searches end ABNORMAL;
+    # each start is therefore polished with derivative-free Powell inside the same bounds.
     bounds = [
         (np.log(0.08), np.log(4.0)),
         (float(log_a_grid.min()), float(log_a_grid.max())),
-        (np.log(0.08), np.log(1.2)),
-        (np.log(0.03), np.log(1.2)),
+        (np.log(0.08), np.log(3.0)),
+        (np.log(0.03), np.log(3.0)),
     ]
     best_result = None
     best_value = np.inf
     for start in starts:
         result = optimize.minimize(objective, start, method="L-BFGS-B", bounds=bounds)
+        polished = optimize.minimize(
+            objective,
+            result.x,
+            method="Powell",
+            bounds=bounds,
+            options={"xtol": 1.0e-6, "ftol": 1.0e-9, "maxfev": 20000},
+        )
+        if float(polished.fun) <= float(result.fun):
+            result = polished
         if float(result.fun) < best_value:
             best_value = float(result.fun)
             best_result = result
     if best_result is None:
         raise RuntimeError("Survivability surface fit did not start.")
     result = best_result
+    parameters_at_bound = [
+        bool(np.isclose(value, low, atol=1.0e-6) or np.isclose(value, high, atol=1.0e-6))
+        for value, (low, high) in zip(np.asarray(result.x, dtype=float), bounds, strict=True)
+    ]
     best_params = np.asarray(result.x, dtype=float)
     boundary_10, boundary_50, boundary_90, meta = boundary_curve_from_params(
         best_params,
@@ -370,6 +387,11 @@ def fit_monotonic_soft_survivability_model(
         "fitted_boundary_90_log10_msun": boundary_90,
         "fitted_probability": fitted_probability,
         "occupancy_table": pd.DataFrame(occupancy_rows),
+        # Fit-quality diagnostics. The constant-band, monotone-B90 form cannot follow the
+        # raw boundaries everywhere; this records by how much it misses them.
+        "max_abs_boundary_50_residual_dex": float(np.nanmax(np.abs(boundary_50 - raw_boundary_50))),
+        "median_abs_boundary_50_residual_dex": float(np.nanmedian(np.abs(boundary_50 - raw_boundary_50))),
+        "parameters_at_bound": parameters_at_bound,
     }
 
 
@@ -433,5 +455,8 @@ def build_smooth_survivability_grid(
         "fitted_boundary_50_log10_msun": np.asarray(fit_payload["fitted_boundary_50_log10_msun"], dtype=float),
         "fitted_boundary_90_log10_msun": np.asarray(fit_payload["fitted_boundary_90_log10_msun"], dtype=float),
         "occupancy_table": fit_payload["occupancy_table"].copy(),
+        "max_abs_boundary_50_residual_dex": float(fit_payload["max_abs_boundary_50_residual_dex"]),
+        "median_abs_boundary_50_residual_dex": float(fit_payload["median_abs_boundary_50_residual_dex"]),
+        "parameters_at_bound": list(fit_payload["parameters_at_bound"]),
         "summary": summary,
     }

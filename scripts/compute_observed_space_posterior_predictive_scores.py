@@ -348,6 +348,10 @@ def score_run(run: ModelRun, n_draws: int, seed: int, n_a_bins: int) -> list[dic
                     "input_log10_m_c_msun": float(row.input_log10_m_c_msun),
                     "fit_log_likelihood_intrinsic": float(payload["summary"].log_likelihood),
                     "poisson_log_likelihood": poisson_log_likelihood(observed, predicted),
+                    # Observed clusters in bins the model gives (numerically) zero rate. Each
+                    # costs ~690 nats through the 1e-300 floor, so a nonzero count means the
+                    # score is set by impossible bins, not by the fit.
+                    "n_observed_in_zero_rate_bins": int(np.sum(observed[np.asarray(predicted) < 1.0e-12])),
                     "observed_total_count": float(np.sum(observed)),
                     "predicted_total_count": float(np.sum(predicted)),
                     "n_prediction_bins": int(np.size(predicted)),
@@ -379,6 +383,7 @@ def summarize(draw_table: pd.DataFrame) -> pd.DataFrame:
                 "p16_draw_log_likelihood": float(np.quantile(values, 0.16)),
                 "p84_draw_log_likelihood": float(np.quantile(values, 0.84)),
                 "mean_predicted_total_count": float(group["predicted_total_count"].mean()),
+                "median_n_observed_in_zero_rate_bins": float(group["n_observed_in_zero_rate_bins"].median()),
             }
         )
     summary = pd.DataFrame(rows)

@@ -10,6 +10,7 @@ import pandas as pd
 from scipy import optimize, special
 
 from .detectability_model import (
+    PRESENT_MASS_EDGE_RANGE_LOG10_MSUN,
     DEFAULT_EM_TOLERANCE,
     StallDetector,
     DetectabilityConvergenceError,
@@ -2035,19 +2036,17 @@ def build_observable_prediction_context_with_abs_longitude(
     observed_abs_latitude_deg = np.abs(catalog["galactic_b_deg"].to_numpy())
     observed_abs_longitude_deg = absolute_wrapped_longitude_degrees(catalog["galactic_l_deg"].to_numpy())
 
-    log_present_mass_min = min(
-        float(observed_log_present_mass.min()),
-        float(np.nanmin(log_present_mass_mean_grid) - 0.5 * present_mass_proxy.residual_sigma_dex),
-    )
-    log_present_mass_max = max(
-        float(observed_log_present_mass.max()),
-        float(np.nanmax(log_present_mass_mean_grid) + 0.5 * present_mass_proxy.residual_sigma_dex),
-    )
+    # Present-mass bin edges are fixed and model independent. They used to be derived from
+    # each model's own predicted M_now grid, so different survival backends -- and, for GG23,
+    # different eta_t, whose initial masses move with it -- binned the same observed catalogue
+    # differently, and the completeness law was fitted to different count vectors.
     log_present_mass_edges = np.linspace(
-        np.floor(log_present_mass_min * 4.0) / 4.0,
-        np.ceil(log_present_mass_max * 4.0) / 4.0,
+        PRESENT_MASS_EDGE_RANGE_LOG10_MSUN[0],
+        PRESENT_MASS_EDGE_RANGE_LOG10_MSUN[1],
         n_present_mass_bins + 1,
     )
+    if observed_log_present_mass.min() < log_present_mass_edges[0] or observed_log_present_mass.max() > log_present_mass_edges[-1]:
+        raise ValueError("Observed present-day masses fall outside the fixed present-mass bin range.")
 
     max_distance_kpc = max(
         float(observed_distance_kpc.max()),

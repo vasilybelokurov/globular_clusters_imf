@@ -132,7 +132,8 @@ class TestCircularSpeedDegeneracy:
     It enters as a constant factor k on t_dis, and the survival cut solves
     t_dis(M_cut) = 12 Gyr / eta_t. So t_dis -> k*t_dis is exactly eta_t -> eta_t/k, and
     eta_t is fitted. The adopted V_ref therefore cannot move any result -- which is why
-    the constant is left at 240 rather than "corrected" to 220.
+    the reference is set to 240 km/s, the value of the Baumgardt et al. (2019)
+    eq. 5 that the catalogue M_ini were computed with.
     """
 
     def test_reference_velocity_is_exactly_absorbed_by_eta_t(self):
@@ -162,31 +163,27 @@ class TestCircularSpeedDegeneracy:
                 f"V_ref must be absorbable by eta_t at r_apo={r_apo}, e={ecc}"
             )
 
-    def test_the_reference_velocity_matches_baumgardt_makino(self):
-        """BM03 normalise to 220 km/s, not 240.
+    def test_dissolution_time_reproduces_baumgardt_2019_eq5(self):
+        """eta_t = 1 must be exactly the prescription behind the catalogue M_ini.
 
-            T_diss = beta (N/ln(gamma N))^x (R_G/kpc) (V_G / 220 km/s)^-1 (1-e)
-            Baumgardt & Makino 2003, MNRAS 340, 227 (arXiv:astro-ph/0211471)
+            T_diss/Myr = 1.35 (M_ini / ln(0.02 N_ini))^0.75 (R_apo/kpc) (V_G/240 km/s)^-1 (1-e)
+            Baumgardt et al. 2019, MNRAS 482, 5138, eq. 5 (arXiv:1811.01507), V_G = 240 km/s
 
-        gg23_survivability.py already used 220 (GG23 extends the same prescription);
-        model.py was the inconsistent one, and it divided by a *literal* 240 so the
-        correction was silently dropped entirely.
+        GG23 keeps its own 220 km/s normalisation.
         """
         from globular_clusters_imf.gg23_survivability import GG23_REFERENCE_VC_KMS
         from globular_clusters_imf.model import (
             DISSOLUTION_REFERENCE_CIRCULAR_SPEED_KMS,
+            MEAN_INITIAL_STELLAR_MASS_MSUN,
             MILKY_WAY_CIRCULAR_SPEED_KMS,
             total_dissolution_time_myr,
         )
 
-        assert DISSOLUTION_REFERENCE_CIRCULAR_SPEED_KMS == 220.0
-        assert GG23_REFERENCE_VC_KMS == 220.0, "the two survival backends must agree"
-        assert MILKY_WAY_CIRCULAR_SPEED_KMS == 240.0  # adopted MW circular speed
+        assert DISSOLUTION_REFERENCE_CIRCULAR_SPEED_KMS == 240.0
+        assert MILKY_WAY_CIRCULAR_SPEED_KMS == 240.0
+        assert GG23_REFERENCE_VC_KMS == 220.0
 
-        # the correction is now actually applied, not identically 1.0
-        applied = total_dissolution_time_myr(1.0e5, 10.0, 0.4)
-        dropped = total_dissolution_time_myr(
-            1.0e5, 10.0, 0.4, circular_speed_kms=240.0, reference_circular_speed_kms=240.0
-        )
-        assert applied != pytest.approx(dropped)
-        assert applied == pytest.approx(dropped * (240.0 / 220.0) ** -1)
+        for mass, r_apo, ecc in [(1.0e5, 8.0, 0.5), (3.0e5, 2.0, 0.7), (2.0e4, 40.0, 0.2)]:
+            n_ini = mass / MEAN_INITIAL_STELLAR_MASS_MSUN
+            expected = 1.35 * (mass / np.log(0.02 * n_ini)) ** 0.75 * r_apo * (1.0 - ecc)
+            assert total_dissolution_time_myr(mass, r_apo, ecc) == pytest.approx(expected, rel=1e-12)

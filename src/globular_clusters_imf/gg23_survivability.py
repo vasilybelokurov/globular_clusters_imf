@@ -295,6 +295,57 @@ def gg23_initial_mass_from_present_msun(
     return result
 
 
+# GG23 eq. 2 defines their initial mass AFTER stellar-evolution mass loss,
+# M_i = mu_sev * M_0 with mu_sev ~= 0.55 (Gieles & Gnedin 2023, arXiv:2303.03791).
+# The Baumgardt catalogue M_ini is a birth mass (B19 eq. 6 carries its own 0.50 factor).
+# Everything that puts GG23 masses on the same axis as Baumgardt, or fits an IMF to them,
+# must use the birth-mass wrappers below; the raw GG23-convention functions above are
+# kept unchanged because they are validated against evgcmf.py and GG23 Fig. 6.
+GG23_STELLAR_EVOLUTION_MASS_FRACTION = 0.55
+
+
+def gg23_birth_mass_from_present_msun(present_mass_msun, effective_radius_kpc, model, **kwargs) -> np.ndarray:
+    """Birth mass M_0 = M_i / mu_sev from the observed present-day mass."""
+    initial = gg23_initial_mass_from_present_msun(present_mass_msun, effective_radius_kpc, model, **kwargs)
+    return initial / GG23_STELLAR_EVOLUTION_MASS_FRACTION
+
+
+def gg23_birth_survival_mass_cut_msun(effective_radius_kpc, model, **kwargs) -> np.ndarray:
+    """Survival threshold expressed as a birth mass."""
+    return gg23_survival_mass_cut_msun(effective_radius_kpc, model, **kwargs) / GG23_STELLAR_EVOLUTION_MASS_FRACTION
+
+
+def gg23_dlog_initial_dlog_present(
+    initial_mass_msun: np.ndarray | float,
+    effective_radius_kpc: np.ndarray | float,
+    model: GG23DisruptionModel,
+    *,
+    gradient_radius_kpc: np.ndarray | float | None = None,
+    age_gyr: float = AGE_GYR,
+    eta_t: float = 1.0,
+) -> np.ndarray:
+    """Jacobian d ln M_i / d ln M_now of the GG23 mass-loss map (GG23 convention M_i).
+
+    M_now = M_i (1 - tau)^{1/y} with tau = (age/eta_t) / t_dis(M_i) and t_dis ~ M_i^x, so
+    d ln M_now / d ln M_i = 1 + (x / y) tau / (1 - tau). The birth-mass rescaling by mu_sev
+    is a constant and leaves this unchanged.
+
+    When the initial masses of the catalogue are recomputed from the observed present-day
+    masses at every eta_t, the likelihood must be written for the observed M_now, and the
+    density in log M_ini picks up sum_i ln(this Jacobian). Without it eta_t is fitted
+    against a change of variables rather than the data.
+    """
+    mass = np.asarray(initial_mass_msun, dtype=float)
+    effective_radius = np.asarray(effective_radius_kpc, dtype=float)
+    gradient_radius = effective_radius if gradient_radius_kpc is None else np.asarray(gradient_radius_kpc, dtype=float)
+    _, y = gg23_radius_dependent_mass_loss_parameters(gradient_radius, model)
+    t_dis = gg23_total_disruption_time_gyr(mass, effective_radius, model, gradient_radius_kpc=gradient_radius)
+    tau = (float(age_gyr) / float(eta_t)) / np.clip(t_dis, 1.0e-12, None)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        dlog_present_dlog_initial = 1.0 + (float(model.x) / y) * tau / (1.0 - tau)
+        return np.where(tau < 1.0, 1.0 / dlog_present_dlog_initial, np.nan)
+
+
 def build_raw_gg23_survival_grid_from_catalog(
     catalog: pd.DataFrame,
     model: GG23DisruptionModel,
@@ -309,7 +360,8 @@ def build_raw_gg23_survival_grid_from_catalog(
         working["semi_major_axis_kpc"].to_numpy(dtype=float),
         working["eccentricity"].to_numpy(dtype=float),
     )
-    cuts = gg23_survival_mass_cut_msun(
+    # Birth-mass threshold, on the same axis as the Baumgardt M_ini and the fitted IMF.
+    cuts = gg23_birth_survival_mass_cut_msun(
         effective_radius,
         model,
         gradient_radius_kpc=working["semi_major_axis_kpc"].to_numpy(dtype=float),
@@ -343,6 +395,7 @@ def build_raw_gg23_survival_grid_from_catalog(
         "bandwidth_log10_a_dex": bandwidth_log10_a_dex,
         "eta_t": float(eta_t),
         "gg23_model": asdict(model),
+        "mass_definition": "birth (GG23 M_i / mu_sev)",
     }
 
 
@@ -391,6 +444,9 @@ def build_gg23_survivability_grid(
         "fitted_boundary_50_log10_msun": np.asarray(fit_payload["fitted_boundary_50_log10_msun"], dtype=float),
         "fitted_boundary_90_log10_msun": np.asarray(fit_payload["fitted_boundary_90_log10_msun"], dtype=float),
         "occupancy_table": fit_payload["occupancy_table"].copy(),
+        "max_abs_boundary_50_residual_dex": float(fit_payload["max_abs_boundary_50_residual_dex"]),
+        "median_abs_boundary_50_residual_dex": float(fit_payload["median_abs_boundary_50_residual_dex"]),
+        "parameters_at_bound": list(fit_payload["parameters_at_bound"]),
         "summary": summary,
         "gg23_model": asdict(model),
         "raw_catalog": raw_grid["catalog"].copy(),

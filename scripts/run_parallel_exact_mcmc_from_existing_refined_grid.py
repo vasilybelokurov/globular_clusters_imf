@@ -21,6 +21,8 @@ import numpy as np
 import pandas as pd
 
 from globular_clusters_imf.joint_model import JointModelSpec
+from globular_clusters_imf.mcmc_diagnostics import compute_split_rhat, effective_sample_size
+from globular_clusters_imf.provenance import provenance_stamp
 from globular_clusters_imf.model import fit_catalog_models
 from run_profile_map_and_exact_mcmc_schechter_powerlaw_a import (
     _compute_rhat,
@@ -147,6 +149,14 @@ def main() -> None:
     parser.add_argument('--mcmc-adapt-every', type=int, default=20)
     parser.add_argument('--mcmc-seed', type=int, default=20260527)
     parser.add_argument('--anchor-k', type=int, default=18)
+    # Uniform prior box on (eta_t, alpha, log10 Mc). If not given it falls back to the extent
+    # of the refined grid, which is data-derived and can truncate the posterior; the box used
+    # is always written to the summary, together with the fraction of samples near its edges.
+    parser.add_argument('--prior-eta', type=str, default='', help='lo,hi')
+    parser.add_argument('--prior-alpha', type=str, default='', help='lo,hi')
+    parser.add_argument('--prior-logmc', type=str, default='', help='lo,hi')
+    parser.add_argument('--min-ess', type=float, default=400.0)
+    parser.add_argument('--max-split-rhat', type=float, default=1.02)
     parser.add_argument('--anchor-pool', type=int, default=36)
     parser.add_argument('--chain-worker-config')
     parser.add_argument('--chain-worker-output')
@@ -192,6 +202,14 @@ def main() -> None:
         [float(refined_table['input_alpha_dndm'].min()), float(refined_table['input_alpha_dndm'].max())],
         [float(refined_table['input_log10_m_c_msun'].min()), float(refined_table['input_log10_m_c_msun'].max())],
     ], dtype=float)
+    prior_source = 'refined_grid_extent'
+    for index, text in enumerate([args.prior_eta, args.prior_alpha, args.prior_logmc]):
+        if text:
+            lo, hi = (float(value) for value in text.split(','))
+            if not lo < hi:
+                raise ValueError(f'Invalid prior bounds {text!r}')
+            refined_bounds[index] = [lo, hi]
+            prior_source = 'command_line'
     widths = refined_bounds[:, 1] - refined_bounds[:, 0]
 
     prepared_catalog = _load_catalog(output_root / 'outputs' / 'parallel_exact_mcmc_prepare')
@@ -332,6 +350,40 @@ def main() -> None:
             continue
         rhat[column] = _compute_rhat(pivot)
 
+    convergence = {}
+    post_burn = chain_table.loc[chain_table['step'] >= int(args.mcmc_burn)]
+    for column in ['eta_t', 'input_alpha_dndm', 'input_log10_m_c_msun', 'final_total_initial_count_above_log10_4']:
+        if column not in post_burn.columns:
+            continue
+        stacked = np.array([frame[column].to_numpy(dtype=float) for _, frame in post_burn.groupby('chain')])
+        convergence[column] = {
+            'split_rhat': compute_split_rhat(stacked),
+            'ess': effective_sample_size(stacked),
+        }
+    prior_edge_fraction = {}
+    for index, column in enumerate(['eta_t', 'input_alpha_dndm', 'input_log10_m_c_msun']):
+        values = posterior_table[column].to_numpy(dtype=float)
+        lo, hi = refined_bounds[index]
+        margin = 0.02 * (hi - lo)
+        prior_edge_fraction[column] = {
+            'below_lo_plus_2pc': float(np.mean(values < lo + margin)),
+            'above_hi_minus_2pc': float(np.mean(values > hi - margin)),
+        }
+    gate_passed = all(
+        np.isfinite(item['split_rhat']) and item['split_rhat'] <= float(args.max_split_rhat)
+        and np.isfinite(item['ess']) and item['ess'] >= float(args.min_ess)
+        for item in convergence.values()
+    )
+    edge_ok = all(max(item.values()) < 0.01 for item in prior_edge_fraction.values())
+    if not gate_passed:
+        print(f'[parallel exact mcmc] WARNING: convergence gate FAILED: {convergence}')
+    if not edge_ok:
+        print(f'[parallel exact mcmc] WARNING: posterior reaches the prior box: {prior_edge_fraction}')
+    if 'detectability_converged' in posterior_table.columns:
+        detectability_converged_fraction = float(posterior_table['detectability_converged'].astype(bool).mean())
+    else:
+        detectability_converged_fraction = float('nan')
+
     acceptance_by_chain = {str(result['chain_id']): float(result['acceptance']) for result in chain_results}
     best_posterior_row = posterior_table.sort_values('log_likelihood', ascending=False).iloc[0].to_dict()
 
@@ -357,6 +409,7 @@ def main() -> None:
     _save_best_payload(best_entry, tables_dir, prefix='exact_parallel_mcmc')
 
     summary = {
+        'provenance': provenance_stamp([tables_dir / 'refined_grid_results.csv']),
         'source_output_root_name': args.source_output_root_name,
         'output_root_name': output_root_name,
         'survivability_backend': survivability_backend,
@@ -381,6 +434,22 @@ def main() -> None:
         },
         'anchor_count': int(len(lightweight_anchors)),
         'refined_bounds': refined_bounds.tolist(),
+        'target': 'profile likelihood exp(logL) in (eta_t, alpha, log10 Mc) times a uniform prior on the box',
+        'prior_bounds': {
+            'eta_t': refined_bounds[0].tolist(),
+            'alpha_dndm': refined_bounds[1].tolist(),
+            'log10_m_c_msun': refined_bounds[2].tolist(),
+            'source': prior_source,
+        },
+        'convergence': convergence,
+        'convergence_gate': {
+            'passed': bool(gate_passed),
+            'min_ess': float(args.min_ess),
+            'max_split_rhat': float(args.max_split_rhat),
+        },
+        'prior_edge_fraction': prior_edge_fraction,
+        'posterior_reaches_prior_box': bool(not edge_ok),
+        'detectability_converged_fraction': detectability_converged_fraction,
     }
     (tables_dir / 'exact_parallel_mcmc_summary.json').write_text(json.dumps(summary, indent=2))
 
