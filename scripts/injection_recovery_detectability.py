@@ -133,6 +133,7 @@ def simulate(truth: dict[str, object], n0: float, completeness_raw: np.ndarray, 
     )
     above = log_m >= 4.0
     truth_row = {
+        "n_birth_above_log10_5p5": int(np.sum(log_m >= 5.5)),
         "n_birth": int(n_birth),
         "n_birth_above_log10_4": int(np.sum(above)),
         "n_survivors": int(survives.sum()),
@@ -174,6 +175,11 @@ def run_one(job: dict[str, object]) -> list[dict[str, object]]:
         lm = np.asarray(fit["base_context"].log_mass_grid)
         imf = np.asarray(model["imf_density_grid"])
         frac_above = float(np.trapezoid(np.where(lm >= 4.0, imf, 0.0), lm) / np.trapezoid(imf, lm))
+        frac_above_5p5 = float(np.trapezoid(np.where(lm >= 5.5, imf, 0.0), lm) / np.trapezoid(imf, lm))
+        base_model = fit["baseline_payload"]["model"]  # same fit with Q = 1 (perfect detectability)
+        base_imf = np.asarray(base_model["imf_density_grid"])
+        base_frac = float(np.trapezoid(np.where(lm >= 4.0, base_imf, 0.0), lm) / np.trapezoid(base_imf, lm))
+        base_frac_5p5 = float(np.trapezoid(np.where(lm >= 5.5, base_imf, 0.0), lm) / np.trapezoid(base_imf, lm))
         sel = np.asarray(fit["final_context"].selection_probability_grid)
         surv = np.asarray(fit["final_context"].survival_probability_grid)
         weight = imf[:, None] * np.asarray(model["radial_density_grid"])[None, :] * surv * (lm >= 4.0)[:, None]
@@ -185,6 +191,9 @@ def run_one(job: dict[str, object]) -> list[dict[str, object]]:
                 **truth_row,
                 "fit_n0_total": float(model["total_initial_count"]),
                 "fit_n0_above_log10_4": float(model["total_initial_count"]) * frac_above,
+                "fit_n0_above_log10_5p5": float(model["total_initial_count"]) * frac_above_5p5,
+                "q1_n0_above_log10_4": float(base_model["total_initial_count"]) * base_frac,
+                "q1_n0_above_log10_5p5": float(base_model["total_initial_count"]) * base_frac_5p5,
                 "fit_mean_detectability_above_log10_4": float(np.sum(sel / np.clip(surv, 1e-12, None) * weight) / np.sum(weight)),
                 "fit_log_likelihood": float(fit["final_payload"]["summary"].log_likelihood),
                 "converged": bool(fit["em_converged"]),
@@ -206,6 +215,7 @@ def main() -> None:
                         help="intercept shift for the low-completeness regime")
     parser.add_argument("--target-detected", type=float, default=165.0)
     parser.add_argument("--seed", type=int, default=20261003)
+    parser.add_argument("--iteration-caps", type=int, nargs="+", default=[12, 60])
     args = parser.parse_args()
 
     for variable in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
@@ -233,7 +243,7 @@ def main() -> None:
             "completeness_raw": regimes[name].tolist(),
             "truth_path": str(args.truth),
             "scratch": str(scratch),
-            "iteration_caps": [12, 60],
+            "iteration_caps": list(args.iteration_caps),
         }
         for k, name in enumerate(regimes)
         for i in range(args.n_realisations)
