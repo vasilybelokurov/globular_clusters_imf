@@ -1,6 +1,6 @@
 # Baseline re-audit and re-run, October 2026: findings and decisions
 
-Branch `fix/baseline-rerun` (from `fix/identifiability-and-tests`). Not pushed.
+Branch `fix/baseline-rerun` (from `fix/identifiability-and-tests`); pushed; frozen as tag `v1-final` (2026-10-11).
 Outputs are gitignored, under `variants/baseline_2026-10_*`.
 
 ## Summary
@@ -96,4 +96,4 @@ Catalogues were simulated from the model itself. The fitter was given the true s
 - Uncertainties for the Q = 1 fits (profile likelihood or MCMC; cheap without the iteration).
 - The manuscript still quotes the old (stale) numbers. The downstream builders are hard-coded to the old variant names (16 scripts).
 - README model-comparison numbers are stale (Delta BIC 7.81 vs 5.0).
-- `msp_population_extension_notes.md` and `scripts/plot_initial_vs_current_mass_all_models.py` are untracked.
+- Superseded: the project continues in `../gcimf` (2026-10-11).

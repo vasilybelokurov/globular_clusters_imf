@@ -1,3 +1,8 @@
+> **FROZEN (2026-10-11, tag `v1-final`).** This repository is no longer developed. The project continues in
+> `gcimf` (sibling directory `../gcimf`): GG23 laws only, one law function for survival and present-day mass,
+> completeness fixed from outside (globular_clusters_completeness, product v1), orbits from that product's library.
+> Why: see `run_plans/baseline_2026-10_findings.md` (October 2026 audit). The numbers in `paper/` are stale.
+
 # globular_clusters_imf
 
 Reconstruct the shape of the Milky Way globular-cluster initial mass function using Baumgardt globular-cluster catalogs, while allowing the radial normalization of the population to vary with Galactocentric distance.
